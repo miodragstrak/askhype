@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Zemun">
+  <rect width="500" height="300" fill="#fef3c7"/>
+  <path d="M0 218 C92 198 170 228 250 204 C340 176 416 196 500 166 V300 H0 Z" fill="#38bdf8"/>
+  <path d="M55 120 h78 v96 h-78 Z" fill="#f97316"/>
+  <path d="M148 96 h82 v120 h-82 Z" fill="#f8fafc"/>
+  <path d="M248 112 h82 v104 h-82 Z" fill="#f472b6"/>
+  <path d="M344 84 h92 v132 h-92 Z" fill="#fde68a"/>
+  <path d="M48 120 l46 -36 46 36 Z" fill="#7f1d1d"/>
+  <path d="M140 96 l48 -34 50 34 Z" fill="#92400e"/>
+  <path d="M240 112 l48 -32 50 32 Z" fill="#831843"/>
+  <path d="M336 84 l54 -40 54 40 Z" fill="#78350f"/>
+  <g fill="#172554"><rect x="80" y="154" width="20" height="28"/><rect x="176" y="134" width="22" height="30"/><rect x="280" y="148" width="22" height="30"/><rect x="378" y="122" width="24" height="34"/></g>
+</svg>

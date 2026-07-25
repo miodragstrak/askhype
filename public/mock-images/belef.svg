@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Belef Festival">
+  <rect width="500" height="300" fill="#f8fafc"/>
+  <rect x="58" y="56" width="118" height="188" fill="#f97316"/>
+  <rect x="190" y="84" width="118" height="160" fill="#3b82f6"/>
+  <rect x="322" y="40" width="118" height="204" fill="#facc15"/>
+  <circle cx="116" cy="150" r="42" fill="#111827"/>
+  <path d="M234 186 l48 -80 48 80 Z" fill="#f8fafc"/>
+  <path d="M350 96 h62 v96 h-62 Z" fill="#172554"/>
+</svg>

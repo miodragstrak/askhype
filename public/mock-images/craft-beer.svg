@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Craft beer">
+  <rect width="500" height="300" fill="#fff7ed"/>
+  <rect x="140" y="72" width="86" height="156" rx="22" fill="#f59e0b"/>
+  <rect x="274" y="72" width="86" height="156" rx="22" fill="#d97706"/>
+  <path d="M152 72 h62 v42 h-62 ZM286 72 h62 v42 h-62 Z" fill="#fef3c7"/>
+  <path d="M226 118 h38 c28 0 28 58 0 58 h-38" fill="none" stroke="#92400e" stroke-width="14"/>
+  <path d="M360 118 h38 c28 0 28 58 0 58 h-38" fill="none" stroke="#92400e" stroke-width="14"/>
+  <circle cx="126" cy="68" r="22" fill="#fef3c7"/><circle cx="170" cy="52" r="26" fill="#fef3c7"/><circle cx="310" cy="50" r="24" fill="#fef3c7"/>
+</svg>

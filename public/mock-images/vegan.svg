@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Biljna kuhinja">
+  <rect width="500" height="300" fill="#f0fdf4"/>
+  <circle cx="250" cy="154" r="96" fill="#f8fafc" stroke="#166534" stroke-width="8"/>
+  <path d="M164 160 C210 78 296 78 340 160 C280 146 224 146 164 160 Z" fill="#22c55e"/>
+  <path d="M178 178 C226 154 282 154 328 178 C292 220 214 220 178 178 Z" fill="#84cc16"/>
+  <circle cx="214" cy="168" r="12" fill="#f97316"/>
+  <circle cx="280" cy="166" r="14" fill="#ef4444"/>
+  <path d="M250 118 C252 92 272 78 302 76 C292 104 274 118 250 118 Z" fill="#15803d"/>
+</svg>

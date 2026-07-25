@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="EXIT Festival">
+  <rect width="500" height="300" fill="#111827"/>
+  <circle cx="112" cy="76" r="54" fill="#facc15"/>
+  <circle cx="384" cy="86" r="64" fill="#ec4899"/>
+  <path d="M64 236 C132 138 196 172 250 94 C306 174 376 138 444 236 Z" fill="#312e81"/>
+  <g stroke="#f8fafc" stroke-width="10" stroke-linecap="round"><path d="M108 236 V138"/><path d="M250 236 V116"/><path d="M392 236 V150"/></g>
+  <g fill="#facc15"><circle cx="108" cy="132" r="16"/><circle cx="250" cy="110" r="18"/><circle cx="392" cy="144" r="14"/></g>
+</svg>

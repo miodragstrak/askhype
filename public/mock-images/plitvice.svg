@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Plitvice">
+  <rect width="500" height="300" fill="#dcfce7"/>
+  <path d="M0 120 C98 82 178 108 252 76 C330 42 408 56 500 28 V300 H0 Z" fill="#15803d"/>
+  <path d="M0 176 C74 142 154 154 236 126 C314 100 402 96 500 68 V300 H0 Z" fill="#16a34a"/>
+  <path d="M168 92 h44 v162 h-44 Z" fill="#e0f2fe"/>
+  <path d="M226 80 h56 v184 h-56 Z" fill="#bae6fd"/>
+  <path d="M296 106 h40 v142 h-40 Z" fill="#e0f2fe"/>
+  <path d="M0 238 C112 208 186 250 292 222 C390 196 442 220 500 204 V300 H0 Z" fill="#0284c7"/>
+  <path d="M0 258 C92 236 172 270 276 246 C382 222 438 244 500 232 V300 H0 Z" fill="#0ea5e9" opacity=".75"/>
+</svg>

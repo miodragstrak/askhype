@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Leto na Balkanu">
+  <rect width="500" height="300" fill="#fde68a"/>
+  <circle cx="396" cy="70" r="44" fill="#f97316"/>
+  <path d="M0 176 C98 146 164 170 246 138 C330 104 404 126 500 88 V300 H0 Z" fill="#22c55e"/>
+  <path d="M0 226 C96 198 166 226 250 196 C330 166 404 184 500 150 V300 H0 Z" fill="#0284c7"/>
+  <path d="M70 206 h148 l-30 50 h-88 Z" fill="#f8fafc"/>
+  <path d="M90 194 h104 l24 12 h-148 Z" fill="#1e3a8a"/>
+  <path d="M270 218 q46 -56 92 0" fill="none" stroke="#f8fafc" stroke-width="14" stroke-linecap="round"/>
+</svg>

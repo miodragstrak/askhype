@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" role="img" aria-label="Đerdap">
+  <rect width="500" height="300" fill="#e0f2fe"/>
+  <path d="M0 56 C78 92 118 158 192 196 C250 226 330 198 500 130 V300 H0 Z" fill="#14532d"/>
+  <path d="M500 48 C424 80 388 142 326 184 C270 222 190 206 0 146 V300 H500 Z" fill="#166534"/>
+  <path d="M0 200 C104 166 192 238 282 204 C362 174 430 176 500 150 V300 H0 Z" fill="#0284c7"/>
+  <path d="M0 226 C106 194 194 258 288 228 C370 202 430 202 500 182 V300 H0 Z" fill="#38bdf8" opacity=".62"/>
+</svg>
