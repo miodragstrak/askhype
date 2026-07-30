@@ -8,8 +8,12 @@ app/api/routes/chat.py
 app/api/routes/health.py
 app/core/__init__.py
 app/core/config.py
+app/prompts/__init__.py
+app/prompts/askhype.py
 app/providers/__init__.py
 app/providers/base.py
+app/providers/exceptions.py
+app/providers/gemini.py
 app/providers/mock.py
 app/schemas/__init__.py
 app/schemas/chat.py
@@ -21,4 +25,6 @@ askhype_backend.egg-info/dependency_links.txt
 askhype_backend.egg-info/requires.txt
 askhype_backend.egg-info/top_level.txt
 tests/test_chat.py
+tests/test_chat_errors.py
+tests/test_gemini_provider.py
 tests/test_health.py

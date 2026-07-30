@@ -5,10 +5,11 @@ Summary: FastAPI backend foundation for AskHype.
 Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 Requires-Dist: fastapi<0.116.0,>=0.115.6
+Requires-Dist: google-genai<3,>=2.13
 Requires-Dist: uvicorn[standard]<0.35.0,>=0.34.0
 Requires-Dist: pydantic-settings<3.0.0,>=2.7.0
 Provides-Extra: dev
-Requires-Dist: httpx<0.28.0,>=0.27.0; extra == "dev"
+Requires-Dist: httpx<1.0.0,>=0.28.1; extra == "dev"
 Requires-Dist: pytest<10.0.0,>=9.0.0; extra == "dev"
 
 # AskHype Backend
@@ -17,9 +18,9 @@ FastAPI backend foundation for AskHype, a mobile-first AI PWA focused on enterta
 
 ## Current Scope
 
-This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, and a structured mock chat endpoint.
+This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, and a structured chat endpoint.
 
-The chat endpoint runs in mock provider mode by default. It returns deterministic Serbian demo recommendations and does not call external AI APIs. Gemini integration will be added in a later step.
+The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
 ## Folder Structure
 
@@ -31,7 +32,10 @@ backend/
 │   ├── api/routes/health.py
 │   ├── core/config.py
 │   ├── providers/base.py
+│   ├── providers/exceptions.py
+│   ├── providers/gemini.py
 │   ├── providers/mock.py
+│   ├── prompts/askhype.py
 │   ├── schemas/chat.py
 │   └── services/chat_service.py
 ├── tests/
@@ -62,6 +66,8 @@ Install dependencies:
 ```bash
 python -m pip install -e ".[dev]"
 ```
+
+This installs FastAPI plus the official Google GenAI Python SDK package, `google-genai`.
 
 Optionally create a local environment file:
 
@@ -184,6 +190,11 @@ Supported environment variables:
 - `API_PREFIX`
 - `FRONTEND_ORIGIN`
 - `AI_PROVIDER`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `GEMINI_TIMEOUT_SECONDS`
+- `GEMINI_TEMPERATURE`
+- `GEMINI_MAX_OUTPUT_TOKENS`
 
 Safe default values are listed in `.env.example`.
 
@@ -191,11 +202,74 @@ Safe default values are listed in `.env.example`.
 
 `AI_PROVIDER=mock` is the default. The mock provider is deterministic, uses no network, and supports demo scenarios for nightlife, events, travel planning, food, restaurants, and a generic AskHype fallback.
 
+Keep mock mode active with:
+
+```bash
+AI_PROVIDER=mock
+```
+
+Mock mode does not require `GEMINI_API_KEY`.
+
+## Gemini Provider Mode
+
+Gemini mode uses the official Google GenAI SDK and the same frontend-facing `ChatResponse` schema as mock mode.
+
+Local `.env` example:
+
+```bash
+AI_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_TIMEOUT_SECONDS=45
+GEMINI_TEMPERATURE=0.4
+GEMINI_MAX_OUTPUT_TOKENS=4096
+```
+
+Verify your local `backend/.env` value when smoke testing; the provider always uses `GEMINI_MODEL` from settings and does not hardcode the model.
+
+Never commit a real key. Return to mock mode by setting:
+
+```bash
+AI_PROVIDER=mock
+```
+
+When Gemini mode is enabled without a key, `/api/chat` returns a clear 503 configuration error. Timeouts return 504, invalid structured responses return 502, and provider unavailability or rate limits return 503. Raw SDK errors, stack traces, and secrets are not returned to the frontend.
+
+## Structured Output
+
+Gemini is asked for an internal structured JSON payload containing only model-generated fields: answer type, summary, exactly 3 recommendations, 2 to 4 follow-up actions, and source labels. The backend then validates and normalizes that payload into the existing `ChatResponse`, adding application-owned fields such as `conversation_id`, `provider`, and `generated_at`.
+
+The Gemini request uses a constrained JSON schema derived from the internal Pydantic model. Schema sanitization is context-aware: application field names inside `properties` mappings are never removed, even if a field is named `title`, `default`, or `additionalProperties`. Unsupported schema metadata such as `default` is removed before SDK submission when needed, and `required` entries are checked against sibling `properties` before any request is made. Application-side Pydantic validation remains authoritative after generation.
+
+The backend rejects malformed JSON, empty required content, duplicate or out-of-range follow-up actions, and the wrong recommendation count. Invalid model-provided URLs are returned as `null`; the backend does not invent replacement URLs.
+
+## Source Verification
+
+This step does not include web search, grounding, a database, RAG, scraping, or external tourism APIs. Gemini responses must not claim live verification. Source labels may describe unverified AI guidance, and `last_verified` should stay `null` unless a future application-side verification event exists.
+
+## Conversation Context
+
+The chat request passes the current message, selected location, requested language, interests, and any existing `conversation_id` to the provider. The backend preserves `conversation_id` in the response, but true stored multi-turn semantic memory is not implemented yet.
+
+## Manual Gemini Smoke Test
+
+A real Gemini smoke test consumes Gemini API quota. Run it only when you intentionally set a valid local key, start the API, and send one request:
+
+```bash
+AI_PROVIDER=gemini GEMINI_API_KEY=... uvicorn app.main:app --host 127.0.0.1 --port 8000
+curl -X POST http://127.0.0.1:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Predloži tri ideje za veče u Beogradu","location":"Beograd","language":"sr"}'
+```
+
+Do not print or share your key. The automated tests mock the SDK client and never call the real Gemini API.
+
 ## Limitations
 
 - No authentication
 - No database
-- No external AI provider integration
 - No Supabase integration
 - No RAG pipeline
 - No external API calls
+- No web search or live source verification
+- No stored multi-turn semantic memory
