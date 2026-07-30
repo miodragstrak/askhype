@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import {
   CalendarDays,
   CircleDollarSign,
@@ -9,6 +9,7 @@ import {
   RefreshCcw,
   Sparkles,
 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, AskHypeInput, FilterChip, QuickPromptChip } from '../components';
 import { sendChatMessage } from '../services/chat-api';
 import type { ChatResponse, ChatRecommendation, SourceReference } from '../types/chat';
@@ -37,10 +38,24 @@ interface ChatState {
 }
 
 type ChatAction =
-  | { type: 'submit'; message: ChatMessage; text: string }
+  | { type: 'submit'; message?: ChatMessage; text: string }
   | { type: 'success'; message: ChatMessage; conversationId: string }
   | { type: 'failure'; error: string }
   | { type: 'clear_error' };
+
+type InitialPrompt = {
+  id: string;
+  text: string;
+};
+
+type ChatLocationState = {
+  initialPrompt?: InitialPrompt;
+} | null;
+
+type SubmitOptions = {
+  appendUserMessage?: boolean;
+  messageId?: string;
+};
 
 const initialState: ChatState = {
   messages: [],
@@ -56,12 +71,15 @@ const examplePrompts = [
   { id: 'food', text: 'Gde mogu dobro da večeram u Beogradu?', iconName: 'Utensils' },
 ];
 
+const PROCESSED_INITIAL_PROMPTS_KEY = 'askhype.processedInitialPrompts';
+const processedInitialPromptIds = new Set<string>();
+
 const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
   switch (action.type) {
     case 'submit':
       return {
         ...state,
-        messages: [...state.messages, action.message],
+        messages: action.message ? [...state.messages, action.message] : state.messages,
         isLoading: true,
         error: null,
         lastSubmittedText: action.text,
@@ -92,6 +110,42 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
 
 const createMessageId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const isValidInitialPrompt = (value: unknown): value is InitialPrompt => {
+  if (!value || typeof value !== 'object') return false;
+
+  const prompt = value as Partial<InitialPrompt>;
+  return (
+    typeof prompt.id === 'string' &&
+    prompt.id.trim().length > 0 &&
+    typeof prompt.text === 'string' &&
+    prompt.text.trim().length > 0
+  );
+};
+
+const getProcessedInitialPromptIds = () => {
+  try {
+    const rawValue = sessionStorage.getItem(PROCESSED_INITIAL_PROMPTS_KEY);
+    const parsed = rawValue ? JSON.parse(rawValue) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const hasProcessedInitialPrompt = (id: string) =>
+  processedInitialPromptIds.has(id) || getProcessedInitialPromptIds().includes(id);
+
+const markInitialPromptProcessed = (id: string) => {
+  processedInitialPromptIds.add(id);
+
+  try {
+    const nextIds = [...new Set([...getProcessedInitialPromptIds(), id])].slice(-50);
+    sessionStorage.setItem(PROCESSED_INITIAL_PROMPTS_KEY, JSON.stringify(nextIds));
+  } catch {
+    // The module-level set still prevents duplicate sends when storage is unavailable.
+  }
+};
 
 const formatSourceDate = (value?: string | null) => {
   if (!value) return null;
@@ -309,28 +363,30 @@ const AssistantMessage: React.FC<{
 
 export const ChatPage: React.FC = () => {
   const [state, dispatch] = useReducer(chatReducer, initialState);
+  const locationState = useLocation().state as ChatLocationState;
+  const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const processedInitialPromptRef = useRef<Set<string>>(new Set());
   const userPreferences = useMemo(() => storageUtils.getUserPreferences(), []);
   const location = userPreferences.city || 'Beograd';
-  const interests = userPreferences.interests ?? [];
+  const interests = useMemo(() => userPreferences.interests ?? [], [userPreferences.interests]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [state.messages.length, state.isLoading, state.error]);
-
-  const submitMessage = async (rawValue: string) => {
+  const submitMessage = useCallback(async (rawValue: string, options: SubmitOptions = {}) => {
     const text = rawValue.trim();
+    const { appendUserMessage = true, messageId } = options;
 
     if (!text || state.isLoading) {
       return;
     }
 
-    const userMessage: ChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      text,
-      createdAt: new Date().toISOString(),
-    };
+    const userMessage: ChatMessage | undefined = appendUserMessage
+      ? {
+          id: messageId ?? createMessageId('user'),
+          role: 'user',
+          text,
+          createdAt: new Date().toISOString(),
+        }
+      : undefined;
 
     dispatch({ type: 'submit', message: userMessage, text });
 
@@ -360,14 +416,39 @@ export const ChatPage: React.FC = () => {
           'AskHype trenutno ne može da odgovori. Proveri da li je backend pokrenut i pokušaj ponovo.',
       });
     }
-  };
+  }, [interests, location, state.conversationId, state.isLoading, userPreferences.language]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [state.messages.length, state.isLoading, state.error]);
+
+  useEffect(() => {
+    const initialPrompt = locationState?.initialPrompt;
+    if (!isValidInitialPrompt(initialPrompt)) return;
+
+    const promptId = initialPrompt.id.trim();
+    const promptText = initialPrompt.text.trim();
+    const alreadyHandled =
+      processedInitialPromptRef.current.has(promptId) || hasProcessedInitialPrompt(promptId);
+
+    navigate('/chat', { replace: true, state: null });
+
+    if (alreadyHandled) return;
+
+    processedInitialPromptRef.current.add(promptId);
+    markInitialPromptProcessed(promptId);
+    void submitMessage(promptText, {
+      appendUserMessage: true,
+      messageId: `initial-${promptId}`,
+    });
+  }, [locationState, navigate, submitMessage]);
 
   const handleRetry = () => {
     const retryText = state.lastSubmittedText;
     dispatch({ type: 'clear_error' });
 
     if (retryText) {
-      void submitMessage(retryText);
+      void submitMessage(retryText, { appendUserMessage: false });
     }
   };
 

@@ -14,12 +14,26 @@ import { categories, quickPrompts, destinations, hypeArticles } from '../mock-da
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
 
-  const handlePromptSubmit = () => {
-    navigate('/chat');
+  const createPromptId = () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+
+    return `prompt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
-  const handleQuickPrompt = () => {
-    navigate('/chat');
+  const submitPromptToChat = (value: string) => {
+    const text = value.trim();
+    if (!text) return;
+
+    navigate('/chat', {
+      state: {
+        initialPrompt: {
+          id: createPromptId(),
+          text,
+        },
+      },
+    });
   };
 
   const categoryArray = Object.values(categories).slice(0, 6);
@@ -46,7 +60,7 @@ export const HomePage: React.FC = () => {
           </p>
           <AskHypeInput
             placeholder="Pitaj AskHype…"
-            onSubmit={handlePromptSubmit}
+            onSubmit={submitPromptToChat}
             className="w-full"
           />
         </div>
@@ -65,7 +79,7 @@ export const HomePage: React.FC = () => {
                 <QuickPromptChip
                   text={prompt.text}
                   iconName={prompt.icon}
-                  onClick={handleQuickPrompt}
+                  onClick={() => submitPromptToChat(prompt.text)}
                   variant="outline"
                 />
               </div>
