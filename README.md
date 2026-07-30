@@ -18,6 +18,8 @@ npm run dev
 
 The app will be available at `http://localhost:5173/`
 
+For the chat screen to call the local FastAPI mock backend, also run the backend server from `backend/`.
+
 ### Build for Production
 
 ```bash
@@ -99,6 +101,41 @@ public/
 index.html              # HTML entry point
 ```
 
+## Local Full-Stack Development
+
+AskHype includes a FastAPI backend under `backend/`. The Chat page calls the backend mock chat endpoint; `AI_PROVIDER` is still `mock`, and no external AI API is used.
+
+Create frontend environment configuration from the repository root:
+
+```bash
+cp .env.example .env
+```
+
+Frontend API variable:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Start the backend from `backend/`:
+
+```bash
+python -m pip install -e ".[dev]"
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Start the frontend from the repository root:
+
+```bash
+npm run dev
+```
+
+Expected local URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+- Chat API: `http://localhost:8000/api/chat`
+
 ## Mocked Features
 
 ### Data
@@ -111,18 +148,16 @@ index.html              # HTML entry point
 ### Functionality (LocalStorage)
 - Save/unsave items
 - User preferences persistence
-- Chat history storage
+- Chat context preferences
 
 ### UI Mock Features
-- Chat conversations (static)
-- AI responses (static templates)
+- Chat responses from the local FastAPI mock provider
 - Recommendation reasoning
-- Next actions (non-functional)
+- Follow-up action chips
 
 ## Intentionally Excluded
 
 ### Not Implemented
-- ❌ Backend/API
 - ❌ Authentication
 - ❌ Database/Supabase
 - ❌ Real AI integration
@@ -133,9 +168,8 @@ index.html              # HTML entry point
 
 ### Placeholder Systems
 - 📷 Images: External placeholder service
-- 🤖 AI: Mock responses
+- 🤖 AI: Local backend mock provider
 - 📍 Location: Manual dropdown
-- 💬 Chat: Non-functional UI
 - 💳 Payments: Display only
 
 ## Tech Stack
@@ -157,7 +191,7 @@ index.html              # HTML entry point
 ## Known Limitations
 
 1. Images from external placeholder service
-2. Static mock AI responses
+2. AI_PROVIDER is still mock
 3. Manual location selection only
 4. Client-side filtering only
 5. No pagination

@@ -23,18 +23,19 @@ export const QuickPromptChip: React.FC<QuickPromptChipProps> = ({
   return (
     <button
       onClick={onClick}
+      title={text}
       className={clsx(
         'px-4 py-3 rounded-full transition-all duration-200',
         'flex items-center gap-2 text-sm font-medium',
-        'min-w-max whitespace-nowrap',
+        'min-w-0 max-w-[260px] flex-shrink-0 whitespace-nowrap',
         variant === 'outline'
           ? 'border-2 border-navy-900 text-navy-900 hover:bg-navy-900 hover:text-hype-white'
           : 'bg-navy-900 text-hype-white hover:bg-navy-800',
         className
       )}
     >
-      <IconComponent size={16} />
-      <span>{text}</span>
+      <IconComponent size={16} className="flex-shrink-0" />
+      <span className="truncate">{text}</span>
     </button>
   );
 };

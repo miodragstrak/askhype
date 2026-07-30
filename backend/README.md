@@ -66,6 +66,8 @@ Start the development server:
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+For local frontend integration, run the React/Vite app from the repository root with `VITE_API_BASE_URL=http://localhost:8000`.
+
 Run tests:
 
 ```bash
