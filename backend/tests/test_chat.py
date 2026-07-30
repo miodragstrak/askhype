@@ -1,19 +1,27 @@
-from fastapi.testclient import TestClient
+import asyncio
+
+import httpx
 
 from app.main import app
 
 
 def test_chat_nightlife_request_returns_mock_recommendations() -> None:
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/chat",
-            json={
-                "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
-                "location": "Beograd",
-                "language": "sr",
-                "interests": ["muzika", "noćni život"],
-            },
-        )
+    async def request() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/chat",
+                json={
+                    "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
+                    "location": "Beograd",
+                    "language": "sr",
+                    "interests": ["muzika", "noćni život"],
+                },
+            )
+
+    response = asyncio.run(request())
 
     data = response.json()
 
@@ -29,15 +37,21 @@ def test_chat_nightlife_request_returns_mock_recommendations() -> None:
 
 
 def test_chat_travel_request_returns_travel_recommendations() -> None:
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/chat",
-            json={
-                "message": "Predloži vikend putovanje po Crna Gora ili Balkan",
-                "location": "Beograd",
-                "interests": ["more", "planina"],
-            },
-        )
+    async def request() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/chat",
+                json={
+                    "message": "Predloži vikend putovanje po Crna Gora ili Balkan",
+                    "location": "Beograd",
+                    "interests": ["more", "planina"],
+                },
+            )
+
+    response = asyncio.run(request())
 
     data = response.json()
     recommendation_text = " ".join(
@@ -53,7 +67,13 @@ def test_chat_travel_request_returns_travel_recommendations() -> None:
 
 
 def test_chat_empty_message_returns_validation_error() -> None:
-    with TestClient(app) as client:
-        response = client.post("/api/chat", json={"message": ""})
+    async def request() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            return await client.post("/api/chat", json={"message": ""})
+
+    response = asyncio.run(request())
 
     assert response.status_code == 422

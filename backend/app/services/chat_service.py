@@ -1,5 +1,6 @@
 from app.core.config import settings
 from app.providers.base import AIProvider
+from app.providers.gemini import GeminiProvider
 from app.providers.mock import MockAIProvider
 from app.schemas.chat import ChatRequest, ChatResponse
 
@@ -18,6 +19,8 @@ class ChatService:
     def _provider_from_settings(self) -> AIProvider:
         if settings.ai_provider == "mock":
             return MockAIProvider()
+        if settings.ai_provider == "gemini":
+            return GeminiProvider()
 
         raise UnsupportedAIProviderError(
             f"Unsupported AI_PROVIDER value: {settings.ai_provider}"
