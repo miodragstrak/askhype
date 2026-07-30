@@ -4,9 +4,9 @@ FastAPI backend foundation for AskHype, a mobile-first AI PWA focused on enterta
 
 ## Current Scope
 
-This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, and a health endpoint. It does not include authentication, database integration, external AI providers, RAG, or third-party APIs.
+This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, and a structured mock chat endpoint.
 
-AI integration will be added in a later step.
+The chat endpoint runs in mock provider mode by default. It returns deterministic Serbian demo recommendations and does not call external AI APIs. Gemini integration will be added in a later step.
 
 ## Folder Structure
 
@@ -14,12 +14,15 @@ AI integration will be added in a later step.
 backend/
 ├── app/
 │   ├── main.py
+│   ├── api/routes/chat.py
 │   ├── api/routes/health.py
 │   ├── core/config.py
-│   ├── providers/
-│   ├── schemas/
-│   └── services/
+│   ├── providers/base.py
+│   ├── providers/mock.py
+│   ├── schemas/chat.py
+│   └── services/chat_service.py
 ├── tests/
+│   ├── test_chat.py
 │   └── test_health.py
 ├── .env.example
 ├── pyproject.toml
@@ -90,6 +93,71 @@ pytest
 }
 ```
 
+`POST /api/chat`
+
+Request:
+
+```json
+{
+  "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
+  "conversation_id": null,
+  "location": "Beograd",
+  "language": "sr",
+  "interests": ["muzika", "noćni život"]
+}
+```
+
+Response:
+
+```json
+{
+  "conversation_id": "conv_example",
+  "provider": "mock",
+  "answer_type": "recommendations",
+  "summary": "Za Beograd bih krenuo sa tri opcije koje pokrivaju muziku, dobru atmosferu i malo kulture.",
+  "recommendations": [
+    {
+      "id": "nightlife-koncert-01",
+      "title": "Koncert u centru grada",
+      "category": "koncert",
+      "short_description": "Veče sa živom muzikom i publikom koja dolazi zbog atmosfere, ne samo zbog pića.",
+      "location": "Beograd",
+      "estimated_price": "1.200-2.500 RSD",
+      "date_or_duration": "ovog vikenda",
+      "reason": "Dobar izbor ako želiš energičan izlazak bez previše planiranja.",
+      "image_url": "https://example.com/images/askhype-koncert.jpg",
+      "source_url": "https://example.com/events/concert"
+    }
+  ],
+  "follow_up_actions": [
+    "Filtriraj samo događaje za večeras",
+    "Dodaj opcije za mirniji izlazak",
+    "Predloži plan po satima"
+  ],
+  "sources": [
+    {
+      "title": "AskHype mock katalog događaja",
+      "url": "https://example.com/askhype/mock-events",
+      "last_verified": "2026-01-01T09:00:00Z"
+    }
+  ],
+  "generated_at": "2026-01-01T12:00:00Z"
+}
+```
+
+Curl example:
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
+    "location": "Beograd",
+    "language": "sr",
+    "interests": ["muzika", "noćni život"]
+  }'
+```
+
 ## Configuration
 
 Configuration is loaded with `pydantic-settings`.
@@ -103,6 +171,10 @@ Supported environment variables:
 - `AI_PROVIDER`
 
 Safe default values are listed in `.env.example`.
+
+## Mock Provider Mode
+
+`AI_PROVIDER=mock` is the default. The mock provider is deterministic, uses no network, and supports demo scenarios for nightlife, events, travel planning, food, restaurants, and a generic AskHype fallback.
 
 ## Limitations
 
