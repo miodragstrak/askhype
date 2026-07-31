@@ -86,7 +86,8 @@ def test_successful_structured_response_becomes_chat_response() -> None:
     call = models.calls[0]
     assert call["model"] == "gemini-test-model"
     assert "Predloži vikend izlazak u Beogradu" in call["contents"]
-    assert "selected_location: Beograd" in call["contents"]
+    assert "Selected application location: Beograd" in call["contents"]
+    assert "Any explicit place named in the current user message overrides" in call["contents"]
     assert "language: sr" in call["contents"]
     assert "interests: muzika, hrana" in call["contents"]
     assert "conversation_id: conv_existing" in call["contents"]

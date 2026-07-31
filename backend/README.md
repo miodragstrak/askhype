@@ -229,6 +229,12 @@ The Gemini request uses a constrained JSON schema derived from the internal Pyda
 
 The backend rejects malformed JSON, empty required content, duplicate or out-of-range follow-up actions, and the wrong recommendation count. Invalid model-provided URLs are returned as `null`; the backend does not invent replacement URLs.
 
+## Location Precedence
+
+AskHype treats a place named in the current user message as more important than the selected application location. For example, if the request context says `Beograd` but the message asks `Šta da posetim u Boru?`, the model is instructed to answer for Bor, not Beograd. When neither the message nor request context gives a clear location, the assistant should ask a short clarification.
+
+The backend does not run a fragile city parser in this step. It passes the selected app location plus an explicit precedence rule to Gemini and relies on the model to interpret natural-language locations. Human review is still required for factual accuracy because there is no live data, maps, web search, database, scraping, or RAG.
+
 ## Source Verification
 
 This step does not include web search, grounding, a database, RAG, scraping, or external tourism APIs. Gemini responses must not claim live verification. Source labels may describe unverified AI guidance, and `last_verified` should stay `null` unless a future application-side verification event exists.
@@ -249,6 +255,30 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 ```
 
 Do not print or share your key. The automated tests mock the SDK client and never call the real Gemini API.
+
+## Balkan Demo Evaluation
+
+Run the manual demo evaluation from the `backend` directory. Mock mode is safe and does not call external APIs:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider mock
+python scripts/evaluate_demo_locations.py --provider mock --city Bor
+```
+
+Gemini mode sends real requests and consumes Gemini API quota:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider gemini --city Bor --delay 2
+```
+
+Optional reports:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider gemini --delay 2 --output reports/balkan-demo-evaluation.md
+python scripts/evaluate_demo_locations.py --provider gemini --output reports/balkan-demo-evaluation.json
+```
+
+The report records provider success, summaries, recommendation titles and locations, source URL presence, unverified-data caveats, timing, and pending manual review fields. It does not automatically declare factual correctness.
 
 ## Limitations
 

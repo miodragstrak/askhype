@@ -20,6 +20,7 @@ from app.providers.exceptions import (
     AIProviderUnavailableError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
+from app.services.location_context import build_location_context
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,8 @@ class GeminiProvider:
             [
                 "AskHype chat request context:",
                 f"message: {request.message}",
-                f"selected_location: {request.location}",
+                "Location context:",
+                build_location_context(request),
                 f"language: {request.language}",
                 f"interests: {interests}",
                 f"conversation_id: {conversation}",
