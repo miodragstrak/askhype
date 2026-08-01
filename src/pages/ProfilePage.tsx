@@ -1,15 +1,48 @@
 import React, { useState } from 'react';
+import { Loader2, LogOut, UserRound } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '../components';
 import { locations, categories } from '../mock-data';
 import { storageUtils } from '../utils';
 import type { UserPreferences } from '../types';
 import { srLabels } from '../constants/labels';
+import { getSafeAuthMessage, useAuth } from '../auth';
+
+const planLabel = (plan?: string | null) => {
+  if (plan === 'premium') return 'Premium';
+  return 'Besplatan paket';
+};
+
+const initialsFrom = (value?: string | null) => {
+  const parts = value?.trim().split(/\s+/).filter(Boolean) ?? [];
+  if (!parts.length) return 'AH';
+  return parts.slice(0, 2).map((part) => part[0]?.toLocaleUpperCase('sr-RS')).join('');
+};
 
 export const ProfilePage: React.FC = () => {
+  const navigate = useNavigate();
+  const { user, profile, isLoading, profileLoading, signOut } = useAuth();
   const [preferences, setPreferences] = useState<UserPreferences>(storageUtils.getUserPreferences());
   const [hasChanges, setHasChanges] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const categoryArray = Object.values(categories);
+  const displayName = profile?.display_name || user?.email || 'AskHype korisnik';
+
+  const handleSignOut = async () => {
+    if (isSigningOut) return;
+
+    setIsSigningOut(true);
+    setAuthError(null);
+    try {
+      await signOut();
+    } catch (error) {
+      setAuthError(getSafeAuthMessage(error));
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   const handleCityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newPrefs = { ...preferences, city: e.target.value };
@@ -58,6 +91,88 @@ export const ProfilePage: React.FC = () => {
       <AppHeader title="Profil" />
 
       <main className="max-w-md mx-auto px-4 py-6 space-y-6">
+        <section className="rounded-2xl bg-hype-gray p-4">
+          {isLoading ? (
+            <div className="flex items-center gap-3 text-sm font-semibold text-navy-700">
+              <Loader2 size={16} className="animate-spin" />
+              Učitavanje naloga...
+            </div>
+          ) : user ? (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-navy-900 text-sm font-bold text-hype-yellow">
+                  {initialsFrom(profile?.display_name || user.email)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-base font-bold text-navy-900">{displayName}</p>
+                  {user.email && (
+                    <p className="break-words text-sm text-navy-600">{user.email}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-navy-700">
+                    <span className="rounded-full bg-hype-yellow px-3 py-1 text-navy-900">
+                      {profileLoading ? 'Učitavanje paketa...' : planLabel(profile?.plan)}
+                    </span>
+                    {(profile?.location || preferences.city) && (
+                      <span className="rounded-full bg-hype-white px-3 py-1">
+                        {profile?.location || preferences.city}
+                      </span>
+                    )}
+                    {(profile?.language || preferences.language) && (
+                      <span className="rounded-full bg-hype-white px-3 py-1">
+                        {profile?.language || preferences.language}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {authError && (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                  {authError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-navy-900 px-4 py-3 text-sm font-bold text-hype-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSigningOut ? <Loader2 size={16} className="animate-spin" /> : <LogOut size={16} />}
+                Odjavi se
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-hype-white text-navy-900">
+                  <UserRound size={22} />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-navy-900">Koristiš AskHype kao gost.</p>
+                  <p className="mt-1 text-sm leading-6 text-navy-700">
+                    Možeš da nastaviš bez naloga. Prijava čuva profil za sledeće korake.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/auth', { state: { redirectTo: '/profile', mode: 'signIn' } })}
+                  className="rounded-xl bg-navy-900 px-4 py-3 text-sm font-bold text-hype-white"
+                >
+                  Prijavi se
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/auth', { state: { redirectTo: '/profile', mode: 'signUp' } })}
+                  className="rounded-xl bg-hype-yellow px-4 py-3 text-sm font-bold text-navy-900"
+                >
+                  Napravi nalog
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
         {/* Location Settings */}
         <section>
           <h2 className="text-sm font-bold text-navy-900 mb-4">Lokacija i Jezici</h2>

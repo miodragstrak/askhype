@@ -61,6 +61,7 @@ npm run preview
 | `/recommendations/:id` | Detail | Individual item details with actions |
 | `/saved` | Saved | Bookmarked items organized by category |
 | `/profile` | Profile | User preferences and settings |
+| `/auth` | Auth | Supabase email/password login and signup |
 
 ## Project Structure
 
@@ -115,7 +116,11 @@ Frontend API variable:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
+
+Vercel must also define `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for production builds.
 
 Start the backend from `backend/`:
 
@@ -150,6 +155,13 @@ Expected local URLs:
 - User preferences persistence
 - Chat context preferences
 
+### Authentication
+- Supabase email/password signup and login
+- Persistent browser session via Supabase Auth
+- Profile display from `public.profiles`
+- Logout from the Profile page
+- Email confirmation may be required; after signup, users may need to confirm email before signing in
+
 ### UI Mock Features
 - Chat responses from the local FastAPI mock provider
 - Recommendation reasoning
@@ -158,9 +170,11 @@ Expected local URLs:
 ## Intentionally Excluded
 
 ### Not Implemented
-- ❌ Authentication
-- ❌ Database/Supabase
-- ❌ Real AI integration
+- ❌ Prompt limits
+- ❌ Backend JWT validation
+- ❌ Usage tracking
+- ❌ Password reset
+- ❌ Magic links or social login
 - ❌ Payments
 - ❌ Push notifications
 - ❌ Real geolocation

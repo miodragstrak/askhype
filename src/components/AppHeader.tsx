@@ -2,6 +2,7 @@ import React from 'react';
 import { MapPin, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AskHypeLogo } from './branding/AskHypeLogo';
+import { useAuth } from '../auth';
 
 interface AppHeaderProps {
   title?: string;
@@ -19,6 +20,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   compact = false,
 }) => {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
+  const displayName = profile?.display_name || user?.email;
+  const initials = displayName
+    ? displayName
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toLocaleUpperCase('sr-RS'))
+        .join('')
+    : null;
+  const profileLabel = user ? 'Profil naloga' : 'Prijavi se ili otvori profil';
 
   if (compact) {
     return (
@@ -36,10 +49,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           </div>
           <button
             onClick={() => navigate('/profile')}
-            className="p-2 hover:bg-hype-gray rounded-full transition"
-            aria-label="Profile"
+            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-hype-gray transition"
+            aria-label={profileLabel}
           >
-            <User size={18} className="text-navy-900" />
+            {initials ? (
+              <span className="text-xs font-bold text-navy-900">{initials}</span>
+            ) : (
+              <User size={18} className="text-navy-900" />
+            )}
           </button>
         </div>
       </header>
@@ -76,10 +93,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {!showBack && (
           <button
             onClick={() => navigate('/profile')}
-            className="p-2 hover:bg-hype-gray rounded-full transition flex-shrink-0"
-            aria-label="Profile"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full hover:bg-hype-gray transition"
+            aria-label={profileLabel}
           >
-            <User size={18} className="text-navy-900" />
+            {initials ? (
+              <span className="text-xs font-bold text-navy-900">{initials}</span>
+            ) : (
+              <User size={18} className="text-navy-900" />
+            )}
           </button>
         )}
       </div>
