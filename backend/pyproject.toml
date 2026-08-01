@@ -20,3 +20,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["tests*", "scripts*"]
+namespaces = false
