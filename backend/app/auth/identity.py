@@ -57,8 +57,8 @@ async def resolve_authenticated_identity(
     if scheme.casefold() != "bearer" or not token.strip():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
 
-    verifier = verifier or SupabaseAuthVerifier()
     try:
+        verifier = verifier or SupabaseAuthVerifier()
         claims = await verifier.verify_claims(token.strip())
         user_id = UUID(str(claims.get("sub")))
     except Exception as exc:

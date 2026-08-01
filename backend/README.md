@@ -4,7 +4,7 @@ FastAPI backend foundation for AskHype, a mobile-first AI PWA focused on enterta
 
 ## Current Scope
 
-This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, structured chat, Supabase identity verification, and server-side prompt usage quotas.
+This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, structured chat, Supabase identity verification, server-side prompt usage quotas, and controlled mock Premium activation for allowlisted demo users.
 
 The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
@@ -188,6 +188,47 @@ Returns the current usage snapshot for the same identity headers used by chat:
 
 When a prompt quota is exhausted, `POST /api/chat` returns HTTP 429 with a structured `detail.code` of `prompt_limit_reached`. Successful `ChatResponse` bodies remain unchanged; usage counts are exposed through `X-AskHype-*` response headers.
 
+`GET /api/mock-subscription`
+
+Requires `Authorization: Bearer <supabase-access-token>`. Guests receive 401.
+
+```json
+{
+  "enabled": true,
+  "eligible": true,
+  "plan": "free",
+  "is_mock": true
+}
+```
+
+`POST /api/mock-subscription/activate`
+
+Activates demo Premium only for the current authenticated user when `can_activate_mock_premium=true` in `public.profiles`.
+
+```json
+{
+  "status": "active",
+  "plan": "premium",
+  "is_mock": true,
+  "message": "Demo Premium paket je aktiviran."
+}
+```
+
+`POST /api/mock-subscription/deactivate`
+
+Returns an eligible demo user to the free plan for repeat testing.
+
+```json
+{
+  "status": "inactive",
+  "plan": "free",
+  "is_mock": true,
+  "message": "Nalog je vraćen na besplatan paket."
+}
+```
+
+These endpoints never accept `user_id`, email, plan, or eligibility from the request body. Eligibility is trusted only from the server-side Supabase profile row. Ordinary users receive 403 with `detail.code=mock_premium_not_allowed`. Missing profiles return a safe 404.
+
 ## Configuration
 
 Configuration is loaded with `pydantic-settings`.
@@ -211,10 +252,25 @@ Supported environment variables:
 - `ANONYMOUS_PROMPT_LIMIT`
 - `FREE_MONTHLY_PROMPT_LIMIT`
 - `PREMIUM_MONTHLY_PROMPT_LIMIT`
+- `MOCK_SUBSCRIPTIONS_ENABLED`
 
 Safe default values are listed in `.env.example`.
 
 Set `QUOTA_ENFORCEMENT_ENABLED=true` only when Supabase server configuration is present. `SUPABASE_SECRET_KEY` and `ANONYMOUS_ID_PEPPER` are server-only secrets and must not be exposed to the frontend.
+
+Set `MOCK_SUBSCRIPTIONS_ENABLED=false` to disable the mock Premium activation endpoints safely.
+
+## Demo Premium Administration
+
+Mock Premium is payment-free and controlled by `public.profiles.can_activate_mock_premium`. An admin can mark a selected demo user after registration:
+
+```sql
+update public.profiles
+set can_activate_mock_premium = true
+where user_id = '<registered-user-id>';
+```
+
+Activation changes only `public.profiles.plan` for the authenticated user. Deactivation changes that same row back to `free`. The endpoints never modify `can_activate_mock_premium`, never reset usage history, and the next `GET /api/usage` recalculates remaining prompts against the newly active free or premium limit.
 
 ## Mock Provider Mode
 

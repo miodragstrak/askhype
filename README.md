@@ -170,6 +170,25 @@ Expected local URLs:
 - The backend verifies identity and enforces guest, free, and premium prompt quotas
 - Chat shows the current usage count and a paywall notice when `/api/chat` returns `prompt_limit_reached`
 - The Premium page is presentation-only; no billing provider is connected yet
+- Demo Premium activation is available only when the backend says the signed-in profile is eligible
+
+### Demo Premium
+- `/premium` shows Free vs Premium, a clear demo notice, and no card fields or checkout
+- Guests are sent to `/auth` with a safe return target of `/premium`
+- Eligible free users can activate demo Premium after a confirmation that no charge occurs
+- Eligible premium users can deactivate back to Free for repeat demo testing
+- Frontend state refreshes profile and usage after activation/deactivation without a full reload
+- The browser never sends plan, email, user ID, or eligibility to activate Premium
+
+Admin allowlist step after a demo user registers:
+
+```sql
+update public.profiles
+set can_activate_mock_premium = true
+where user_id = '<registered-user-id>';
+```
+
+Set `MOCK_SUBSCRIPTIONS_ENABLED=false` on the backend to disable the demo endpoints. Only server-side eligibility is trusted.
 
 ### UI Mock Features
 - Chat responses from the local FastAPI mock provider
@@ -190,7 +209,7 @@ Expected local URLs:
 - 📷 Images: External placeholder service
 - 🤖 AI: Local backend mock provider
 - 📍 Location: Manual dropdown
-- 💳 Payments: Display only Premium page
+- 💳 Payments: Display only Premium page; no real billing is implemented
 
 ## Tech Stack
 

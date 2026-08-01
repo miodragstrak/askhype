@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     anonymous_prompt_limit: int = Field(default=3, gt=0)
     free_monthly_prompt_limit: int = Field(default=10, gt=0)
     premium_monthly_prompt_limit: int = Field(default=200, gt=0)
+    mock_subscriptions_enabled: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
