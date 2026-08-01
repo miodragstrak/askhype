@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: int = Field(default=45, gt=0)
     gemini_temperature: float = 0.4
     gemini_max_output_tokens: int = Field(default=4096, gt=0)
+    quota_enforcement_enabled: bool = False
+    supabase_url: str | None = None
+    supabase_secret_key: SecretStr | None = None
+    anonymous_id_pepper: SecretStr | None = None
+    anonymous_prompt_limit: int = Field(default=3, gt=0)
+    free_monthly_prompt_limit: int = Field(default=10, gt=0)
+    premium_monthly_prompt_limit: int = Field(default=200, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

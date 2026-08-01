@@ -7,6 +7,7 @@ import {
   SavedPage,
   ProfilePage,
   AuthPage,
+  PremiumPage,
 } from './pages';
 import { BottomNavigation } from './components';
 
@@ -21,6 +22,7 @@ export const Router = () => {
         <Route path="/saved" element={<SavedPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/premium" element={<PremiumPage />} />
       </Routes>
       <BottomNavigation />
     </BrowserRouter>

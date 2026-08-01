@@ -6,6 +6,8 @@ from app.main import app
 from app.providers.exceptions import AIProviderUnavailableError
 from app.services.chat_service import ChatService
 
+ANONYMOUS_HEADERS = {"X-Anonymous-ID": "22222222-2222-4222-8222-222222222222"}
+
 
 def test_provider_error_http_response_does_not_expose_secret(monkeypatch) -> None:
     secret = "super-secret-gemini-key"
@@ -20,7 +22,11 @@ def test_provider_error_http_response_does_not_expose_secret(monkeypatch) -> Non
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
         ) as client:
-            return await client.post("/api/chat", json={"message": "Plan za večeras"})
+            return await client.post(
+                "/api/chat",
+                headers=ANONYMOUS_HEADERS,
+                json={"message": "Plan za večeras"},
+            )
 
     response = asyncio.run(request())
 

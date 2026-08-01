@@ -6,6 +6,7 @@ Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 Requires-Dist: fastapi<0.116.0,>=0.115.6
 Requires-Dist: google-genai<3,>=2.13
+Requires-Dist: supabase<3.0.0,>=2.10.0
 Requires-Dist: uvicorn[standard]<0.35.0,>=0.34.0
 Requires-Dist: pydantic-settings<3.0.0,>=2.7.0
 Provides-Extra: dev
@@ -18,7 +19,7 @@ FastAPI backend foundation for AskHype, a mobile-first AI PWA focused on enterta
 
 ## Current Scope
 
-This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, and a structured chat endpoint.
+This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, structured chat, Supabase identity verification, and server-side prompt usage quotas.
 
 The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
@@ -116,6 +117,11 @@ pytest
 
 `POST /api/chat`
 
+Requires one identity header:
+
+- `Authorization: Bearer <supabase-access-token>` for signed-in users
+- `X-Anonymous-ID: <browser-generated-uuid>` for guests
+
 Request:
 
 ```json
@@ -171,6 +177,7 @@ Curl example:
 ```bash
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
+  -H "X-Anonymous-ID: 11111111-1111-4111-8111-111111111111" \
   -d '{
     "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
     "location": "Beograd",
@@ -178,6 +185,23 @@ curl -X POST http://localhost:8000/api/chat \
     "interests": ["muzika", "noćni život"]
   }'
 ```
+
+`GET /api/usage`
+
+Returns the current usage snapshot for the same identity headers used by chat:
+
+```json
+{
+  "identity": "guest",
+  "plan": "guest",
+  "used": 1,
+  "limit": 3,
+  "remaining": 2,
+  "reset_at": null
+}
+```
+
+When a prompt quota is exhausted, `POST /api/chat` returns HTTP 429 with a structured `detail.code` of `prompt_limit_reached`. Successful `ChatResponse` bodies remain unchanged; usage counts are exposed through `X-AskHype-*` response headers.
 
 ## Configuration
 
@@ -195,8 +219,17 @@ Supported environment variables:
 - `GEMINI_TIMEOUT_SECONDS`
 - `GEMINI_TEMPERATURE`
 - `GEMINI_MAX_OUTPUT_TOKENS`
+- `QUOTA_ENFORCEMENT_ENABLED`
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `ANONYMOUS_ID_PEPPER`
+- `ANONYMOUS_PROMPT_LIMIT`
+- `FREE_MONTHLY_PROMPT_LIMIT`
+- `PREMIUM_MONTHLY_PROMPT_LIMIT`
 
 Safe default values are listed in `.env.example`.
+
+Set `QUOTA_ENFORCEMENT_ENABLED=true` only when Supabase server configuration is present. `SUPABASE_SECRET_KEY` and `ANONYMOUS_ID_PEPPER` are server-only secrets and must not be exposed to the frontend.
 
 ## Mock Provider Mode
 
@@ -243,6 +276,12 @@ The Gemini request uses a constrained JSON schema derived from the internal Pyda
 
 The backend rejects malformed JSON, empty required content, duplicate or out-of-range follow-up actions, and the wrong recommendation count. Invalid model-provided URLs are returned as `null`; the backend does not invent replacement URLs.
 
+## Location Precedence
+
+AskHype treats a place named in the current user message as more important than the selected application location. For example, if the request context says `Beograd` but the message asks `Šta da posetim u Boru?`, the model is instructed to answer for Bor, not Beograd. When neither the message nor request context gives a clear location, the assistant should ask a short clarification.
+
+The backend does not run a fragile city parser in this step. It passes the selected app location plus an explicit precedence rule to Gemini and relies on the model to interpret natural-language locations. Human review is still required for factual accuracy because there is no live data, maps, web search, database, scraping, or RAG.
+
 ## Source Verification
 
 This step does not include web search, grounding, a database, RAG, scraping, or external tourism APIs. Gemini responses must not claim live verification. Source labels may describe unverified AI guidance, and `last_verified` should stay `null` unless a future application-side verification event exists.
@@ -263,6 +302,30 @@ curl -X POST http://127.0.0.1:8000/api/chat \
 ```
 
 Do not print or share your key. The automated tests mock the SDK client and never call the real Gemini API.
+
+## Balkan Demo Evaluation
+
+Run the manual demo evaluation from the `backend` directory. Mock mode is safe and does not call external APIs:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider mock
+python scripts/evaluate_demo_locations.py --provider mock --city Bor
+```
+
+Gemini mode sends real requests and consumes Gemini API quota:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider gemini --city Bor --delay 2
+```
+
+Optional reports:
+
+```bash
+python scripts/evaluate_demo_locations.py --provider gemini --delay 2 --output reports/balkan-demo-evaluation.md
+python scripts/evaluate_demo_locations.py --provider gemini --output reports/balkan-demo-evaluation.json
+```
+
+The report records provider success, summaries, recommendation titles and locations, source URL presence, unverified-data caveats, timing, and pending manual review fields. It does not automatically declare factual correctness.
 
 ## Limitations
 

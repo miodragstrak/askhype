@@ -4,7 +4,7 @@ FastAPI backend foundation for AskHype, a mobile-first AI PWA focused on enterta
 
 ## Current Scope
 
-This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, and a structured chat endpoint.
+This backend currently provides the application shell, environment-based configuration, CORS for the local frontend, a health endpoint, structured chat, Supabase identity verification, and server-side prompt usage quotas.
 
 The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
@@ -102,6 +102,11 @@ pytest
 
 `POST /api/chat`
 
+Requires one identity header:
+
+- `Authorization: Bearer <supabase-access-token>` for signed-in users
+- `X-Anonymous-ID: <browser-generated-uuid>` for guests
+
 Request:
 
 ```json
@@ -157,6 +162,7 @@ Curl example:
 ```bash
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
+  -H "X-Anonymous-ID: 11111111-1111-4111-8111-111111111111" \
   -d '{
     "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
     "location": "Beograd",
@@ -164,6 +170,23 @@ curl -X POST http://localhost:8000/api/chat \
     "interests": ["muzika", "noćni život"]
   }'
 ```
+
+`GET /api/usage`
+
+Returns the current usage snapshot for the same identity headers used by chat:
+
+```json
+{
+  "identity": "guest",
+  "plan": "guest",
+  "used": 1,
+  "limit": 3,
+  "remaining": 2,
+  "reset_at": null
+}
+```
+
+When a prompt quota is exhausted, `POST /api/chat` returns HTTP 429 with a structured `detail.code` of `prompt_limit_reached`. Successful `ChatResponse` bodies remain unchanged; usage counts are exposed through `X-AskHype-*` response headers.
 
 ## Configuration
 
@@ -181,8 +204,17 @@ Supported environment variables:
 - `GEMINI_TIMEOUT_SECONDS`
 - `GEMINI_TEMPERATURE`
 - `GEMINI_MAX_OUTPUT_TOKENS`
+- `QUOTA_ENFORCEMENT_ENABLED`
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `ANONYMOUS_ID_PEPPER`
+- `ANONYMOUS_PROMPT_LIMIT`
+- `FREE_MONTHLY_PROMPT_LIMIT`
+- `PREMIUM_MONTHLY_PROMPT_LIMIT`
 
 Safe default values are listed in `.env.example`.
+
+Set `QUOTA_ENFORCEMENT_ENABLED=true` only when Supabase server configuration is present. `SUPABASE_SECRET_KEY` and `ANONYMOUS_ID_PEPPER` are server-only secrets and must not be exposed to the frontend.
 
 ## Mock Provider Mode
 

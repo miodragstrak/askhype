@@ -4,6 +4,8 @@ import httpx
 
 from app.main import app
 
+ANONYMOUS_HEADERS = {"X-Anonymous-ID": "11111111-1111-4111-8111-111111111111"}
+
 
 def test_chat_nightlife_request_returns_mock_recommendations() -> None:
     async def request() -> httpx.Response:
@@ -13,6 +15,7 @@ def test_chat_nightlife_request_returns_mock_recommendations() -> None:
         ) as client:
             return await client.post(
                 "/api/chat",
+                headers=ANONYMOUS_HEADERS,
                 json={
                     "message": "Gde mogu da izađem ovog vikenda u Beogradu?",
                     "location": "Beograd",
@@ -44,6 +47,7 @@ def test_chat_travel_request_returns_travel_recommendations() -> None:
         ) as client:
             return await client.post(
                 "/api/chat",
+                headers=ANONYMOUS_HEADERS,
                 json={
                     "message": "Predloži vikend putovanje po Crna Gora ili Balkan",
                     "location": "Beograd",
@@ -72,7 +76,7 @@ def test_chat_empty_message_returns_validation_error() -> None:
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
         ) as client:
-            return await client.post("/api/chat", json={"message": ""})
+            return await client.post("/api/chat", headers=ANONYMOUS_HEADERS, json={"message": ""})
 
     response = asyncio.run(request())
 

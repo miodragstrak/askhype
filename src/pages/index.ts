@@ -5,3 +5,4 @@ export { RecommendationDetailPage } from './RecommendationDetailPage';
 export { SavedPage } from './SavedPage';
 export { ProfilePage } from './ProfilePage';
 export { AuthPage } from './AuthPage';
+export { PremiumPage } from './PremiumPage';

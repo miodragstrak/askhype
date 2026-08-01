@@ -1,18 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   CalendarDays,
   CircleDollarSign,
   ExternalLink,
   Info,
   Loader2,
+  LockKeyhole,
   MapPin,
   RefreshCcw,
   Sparkles,
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, AskHypeInput, FilterChip, QuickPromptChip } from '../components';
-import { sendChatMessage } from '../services/chat-api';
+import { useAuth } from '../auth';
+import { PromptLimitError, sendChatMessage, type QuotaLimitPayload } from '../services/chat-api';
 import type { ChatResponse, ChatRecommendation, SourceReference } from '../types/chat';
+import { useUsage } from '../usage';
 import { dateUtils, imageUtils, storageUtils, validationUtils } from '../utils';
 
 type ChatMessage =
@@ -41,6 +44,7 @@ type ChatAction =
   | { type: 'submit'; message?: ChatMessage; text: string }
   | { type: 'success'; message: ChatMessage; conversationId: string }
   | { type: 'failure'; error: string }
+  | { type: 'limit_reached' }
   | { type: 'clear_error' };
 
 type InitialPrompt = {
@@ -97,6 +101,12 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
         ...state,
         isLoading: false,
         error: action.error,
+      };
+    case 'limit_reached':
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
       };
     case 'clear_error':
       return {
@@ -361,10 +371,108 @@ const AssistantMessage: React.FC<{
   );
 };
 
+const usageLabel = (plan: string) => {
+  if (plan === 'premium') return 'Premium';
+  if (plan === 'free') return 'Besplatan nalog';
+  return 'Gost';
+};
+
+const UsageBadge: React.FC<{
+  usage: QuotaLimitPayload | null;
+  fallbackUsage: ReturnType<typeof useUsage>['usage'];
+  isLoading: boolean;
+  error: string | null;
+}> = ({ usage, fallbackUsage, isLoading, error }) => {
+  const snapshot = usage ?? fallbackUsage;
+
+  if (error) {
+    return (
+      <div className="rounded-2xl bg-hype-gray px-3 py-2 text-xs font-semibold text-navy-600">
+        Potrošnja nije dostupna
+      </div>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <div className="rounded-2xl bg-hype-gray px-3 py-2 text-xs font-semibold text-navy-600">
+        {isLoading ? 'Provera potrošnje...' : 'AskHype pitanja'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-hype-gray px-3 py-2 text-xs font-semibold text-navy-700">
+      {usageLabel(snapshot.plan)}: {snapshot.used}/{snapshot.limit} pitanja
+    </div>
+  );
+};
+
+const PaywallNotice: React.FC<{
+  payload: QuotaLimitPayload;
+  onSignIn: () => void;
+  onSignUp: () => void;
+  onPremium: () => void;
+}> = ({ payload, onSignIn, onSignUp, onPremium }) => {
+  const isGuest = payload.plan === 'guest';
+
+  return (
+    <section className="mb-6 rounded-2xl border border-hype-yellow bg-hype-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-hype-yellow text-navy-900">
+          <LockKeyhole size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-bold text-navy-900">Dostigao si limit pitanja.</p>
+          <p className="mt-1 text-sm leading-6 text-navy-700">
+            Iskorišćeno je {payload.used} od {payload.limit} pitanja za paket {usageLabel(payload.plan).toLowerCase()}.
+          </p>
+          {payload.reset_at && (
+            <p className="mt-1 text-xs font-semibold text-navy-600">
+              Reset: {dateUtils.formatDate(payload.reset_at)}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {isGuest && (
+          <>
+            <button
+              type="button"
+              onClick={onSignUp}
+              className="rounded-xl bg-navy-900 px-4 py-3 text-sm font-bold text-hype-white transition hover:bg-navy-800"
+            >
+              Napravi nalog
+            </button>
+            <button
+              type="button"
+              onClick={onSignIn}
+              className="rounded-xl bg-hype-gray px-4 py-3 text-sm font-bold text-navy-900 transition hover:bg-hype-light"
+            >
+              Prijavi se
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={onPremium}
+          className="rounded-xl bg-hype-yellow px-4 py-3 text-sm font-bold text-navy-900 transition hover:bg-yellow-300 sm:col-span-2"
+        >
+          Pogledaj Premium
+        </button>
+      </div>
+    </section>
+  );
+};
+
 export const ChatPage: React.FC = () => {
   const [state, dispatch] = useReducer(chatReducer, initialState);
+  const [quotaLimit, setQuotaLimit] = useState<QuotaLimitPayload | null>(null);
   const locationState = useLocation().state as ChatLocationState;
   const navigate = useNavigate();
+  const { session } = useAuth();
+  const { usage, isLoading: usageLoading, error: usageError, refreshUsage, applyUsageSnapshot } = useUsage();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const processedInitialPromptRef = useRef<Set<string>>(new Set());
   const userPreferences = useMemo(() => storageUtils.getUserPreferences(), []);
@@ -389,15 +497,22 @@ export const ChatPage: React.FC = () => {
       : undefined;
 
     dispatch({ type: 'submit', message: userMessage, text });
+    setQuotaLimit(null);
 
     try {
-      const response = await sendChatMessage({
-        message: text,
-        conversation_id: state.conversationId,
-        location,
-        language: userPreferences.language || 'sr',
-        interests,
-      });
+      const result = await sendChatMessage(
+        {
+          message: text,
+          conversation_id: state.conversationId,
+          location,
+          language: userPreferences.language || 'sr',
+          interests,
+        },
+        { accessToken: session?.access_token },
+      );
+      const response = result.data;
+      applyUsageSnapshot(result.usage);
+      void refreshUsage();
 
       dispatch({
         type: 'success',
@@ -409,14 +524,30 @@ export const ChatPage: React.FC = () => {
           createdAt: new Date().toISOString(),
         },
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PromptLimitError) {
+        setQuotaLimit(error.payload);
+        applyUsageSnapshot(error.payload);
+        dispatch({ type: 'limit_reached' });
+        return;
+      }
+
       dispatch({
         type: 'failure',
         error:
           'AskHype trenutno ne može da odgovori. Proveri da li je backend pokrenut i pokušaj ponovo.',
       });
     }
-  }, [interests, location, state.conversationId, state.isLoading, userPreferences.language]);
+  }, [
+    applyUsageSnapshot,
+    interests,
+    location,
+    refreshUsage,
+    session?.access_token,
+    state.conversationId,
+    state.isLoading,
+    userPreferences.language,
+  ]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -452,6 +583,10 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  const goToAuth = (mode: 'signIn' | 'signUp') => {
+    navigate('/auth', { state: { redirectTo: '/chat', mode } });
+  };
+
   return (
     <div className="overflow-x-hidden pb-40 md:pb-6">
       <AppHeader title="Pitaj" />
@@ -464,6 +599,9 @@ export const ChatPage: React.FC = () => {
           <p className="mt-1.5 text-sm leading-6 text-navy-600 sm:text-base">
             Lokalni vodič za izlaske, hranu, događaje i putovanja po Balkanu.
           </p>
+          <div className="mt-3">
+            <UsageBadge usage={quotaLimit} fallbackUsage={usage} isLoading={usageLoading} error={usageError} />
+          </div>
         </div>
 
         <div className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 pb-4 scrollbar-hide sm:-mx-5 sm:px-5 md:-mx-6 md:px-6">
@@ -544,6 +682,15 @@ export const ChatPage: React.FC = () => {
               Pokušaj ponovo
             </button>
           </div>
+        )}
+
+        {quotaLimit && (
+          <PaywallNotice
+            payload={quotaLimit}
+            onSignIn={() => goToAuth('signIn')}
+            onSignUp={() => goToAuth('signUp')}
+            onPremium={() => navigate('/premium')}
+          />
         )}
 
         <div ref={bottomRef} />

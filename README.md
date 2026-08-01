@@ -62,6 +62,7 @@ npm run preview
 | `/saved` | Saved | Bookmarked items organized by category |
 | `/profile` | Profile | User preferences and settings |
 | `/auth` | Auth | Supabase email/password login and signup |
+| `/premium` | Premium | Mock upgrade page for quota/paywall flows |
 
 ## Project Structure
 
@@ -140,6 +141,7 @@ Expected local URLs:
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8000`
 - Chat API: `http://localhost:8000/api/chat`
+- Usage API: `http://localhost:8000/api/usage`
 
 ## Mocked Features
 
@@ -162,6 +164,13 @@ Expected local URLs:
 - Logout from the Profile page
 - Email confirmation may be required; after signup, users may need to confirm email before signing in
 
+### Prompt Usage
+- Guests use a browser-generated anonymous UUID stored in localStorage
+- Signed-in users send the Supabase access token to the backend
+- The backend verifies identity and enforces guest, free, and premium prompt quotas
+- Chat shows the current usage count and a paywall notice when `/api/chat` returns `prompt_limit_reached`
+- The Premium page is presentation-only; no billing provider is connected yet
+
 ### UI Mock Features
 - Chat responses from the local FastAPI mock provider
 - Recommendation reasoning
@@ -170,9 +179,6 @@ Expected local URLs:
 ## Intentionally Excluded
 
 ### Not Implemented
-- ❌ Prompt limits
-- ❌ Backend JWT validation
-- ❌ Usage tracking
 - ❌ Password reset
 - ❌ Magic links or social login
 - ❌ Payments
@@ -184,7 +190,7 @@ Expected local URLs:
 - 📷 Images: External placeholder service
 - 🤖 AI: Local backend mock provider
 - 📍 Location: Manual dropdown
-- 💳 Payments: Display only
+- 💳 Payments: Display only Premium page
 
 ## Tech Stack
 
