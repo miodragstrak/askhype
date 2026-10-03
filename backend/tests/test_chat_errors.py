@@ -17,19 +17,23 @@ def test_provider_error_http_response_does_not_expose_secret(monkeypatch) -> Non
 
     monkeypatch.setattr(ChatService, "generate_response", raise_unavailable)
 
-    async def request() -> httpx.Response:
+    async def request() -> tuple[httpx.Response, httpx.Response]:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
         ) as client:
-            return await client.post(
+            failed = await client.post(
                 "/api/chat",
                 headers=ANONYMOUS_HEADERS,
                 json={"message": "Plan za večeras"},
             )
+            usage = await client.get("/api/usage", headers=ANONYMOUS_HEADERS)
+            return failed, usage
 
-    response = asyncio.run(request())
+    response, usage = asyncio.run(request())
 
     assert response.status_code == 503
     assert secret not in response.text
     assert "AI provider trenutno nije dostupan" in response.text
+    assert usage.status_code == 200
+    assert usage.json()["used"] == 0

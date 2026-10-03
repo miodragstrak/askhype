@@ -11,6 +11,9 @@ def default_to_mock_provider() -> None:
     settings.quota_enforcement_enabled = False
     settings.mock_subscriptions_enabled = True
     settings.anonymous_id_pepper = "test-pepper"
+    settings.anonymous_prompt_limit = 3
+    settings.free_rolling_24h_prompt_limit = 10
+    settings.premium_rolling_24h_prompt_limit = 200
     dependencies._memory_usage_repository.events.clear()
     dependencies._memory_usage_repository.plans.clear()
     dependencies._memory_profile_repository.clear()

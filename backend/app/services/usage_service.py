@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, datetime, timedelta
+from typing import Callable, Literal
 from uuid import UUID, uuid4
 
 from app.auth.identity import RequestIdentity
 from app.core.config import settings
 from app.repositories.usage_repository import UsageRepository, UsageReservation, UsageStatus
 
+RESERVATION_TTL = timedelta(minutes=10)
+
 
 @dataclass(frozen=True)
 class UsageWindow:
-    period_start: datetime
-    reset_at: datetime | None
+    window_start: datetime
+    now: datetime
+    stale_before: datetime
     limit: int
 
 
@@ -45,25 +48,27 @@ class UsageServiceUnavailable(RuntimeError):
 
 
 class UsageService:
-    def __init__(self, repository: UsageRepository) -> None:
+    def __init__(self, repository: UsageRepository, clock: Callable[[], datetime] | None = None) -> None:
         self.repository = repository
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     async def reserve(self, identity: RequestIdentity) -> ReservedUsage:
         request_id = uuid4()
-        window = usage_window(identity.plan)
+        window = usage_window(identity.plan, self.clock())
         try:
             reservation = await self.repository.reserve_prompt_usage(
                 user_id=identity.user_id,
                 anonymous_id_hash=identity.anonymous_id_hash,
-                plan=identity.plan,
                 limit=window.limit,
-                period_start=window.period_start,
+                window_start=window.window_start,
+                reserved_at=window.now,
+                stale_before=window.stale_before,
                 request_id=request_id,
             )
         except Exception as exc:
             raise UsageServiceUnavailable("Usage reservation unavailable.") from exc
 
-        snapshot = _snapshot(identity, reservation, window)
+        snapshot = _snapshot(identity, reservation)
         if not reservation.allowed or reservation.usage_event_id is None:
             raise PromptLimitReached(snapshot)
         return ReservedUsage(request_id=request_id, usage_event_id=reservation.usage_event_id, snapshot=snapshot)
@@ -89,32 +94,35 @@ class UsageService:
             return
 
     async def get_status(self, identity: RequestIdentity) -> UsageSnapshot:
-        window = usage_window(identity.plan)
+        window = usage_window(identity.plan, self.clock())
         try:
             status = await self.repository.get_usage_status(
                 user_id=identity.user_id,
                 anonymous_id_hash=identity.anonymous_id_hash,
-                period_start=window.period_start,
+                window_start=window.window_start,
+                stale_before=window.stale_before,
                 limit=window.limit,
             )
         except Exception as exc:
             raise UsageServiceUnavailable("Usage status unavailable.") from exc
-        return _snapshot(identity, status, window)
+        return _snapshot(identity, status)
 
 
 def usage_window(plan: str, now: datetime | None = None) -> UsageWindow:
     now = now or datetime.now(UTC)
-    if plan == "guest":
-        return UsageWindow(
-            period_start=datetime(2020, 1, 1, tzinfo=UTC),
-            reset_at=None,
-            limit=settings.anonymous_prompt_limit,
-        )
-
-    period_start = datetime(now.year, now.month, 1, tzinfo=UTC)
-    next_month = datetime(now.year + (1 if now.month == 12 else 0), 1 if now.month == 12 else now.month + 1, 1, tzinfo=UTC)
-    limit = settings.premium_monthly_prompt_limit if plan == "premium" else settings.free_monthly_prompt_limit
-    return UsageWindow(period_start=period_start, reset_at=next_month, limit=limit)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    limit = settings.anonymous_prompt_limit
+    if plan == "premium":
+        limit = settings.premium_rolling_24h_prompt_limit
+    elif plan != "guest":
+        limit = settings.free_rolling_24h_prompt_limit
+    return UsageWindow(
+        window_start=now - timedelta(hours=24),
+        now=now,
+        stale_before=now - RESERVATION_TTL,
+        limit=limit,
+    )
 
 
 def quota_payload(snapshot: UsageSnapshot) -> dict[str, object]:
@@ -146,12 +154,12 @@ def usage_headers(snapshot: UsageSnapshot) -> dict[str, str]:
     }
 
 
-def _snapshot(identity: RequestIdentity, usage: UsageReservation | UsageStatus, window: UsageWindow) -> UsageSnapshot:
+def _snapshot(identity: RequestIdentity, usage: UsageReservation | UsageStatus) -> UsageSnapshot:
     return UsageSnapshot(
         identity=identity.kind,
         plan=identity.plan,
         used=usage.used,
         limit=usage.limit,
         remaining=max(usage.remaining, 0),
-        reset_at=window.reset_at,
+        reset_at=usage.reset_at,
     )

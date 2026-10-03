@@ -186,7 +186,9 @@ Returns the current usage snapshot for the same identity headers used by chat:
 }
 ```
 
-When a prompt quota is exhausted, `POST /api/chat` returns HTTP 429 with a structured `detail.code` of `prompt_limit_reached`. Successful `ChatResponse` bodies remain unchanged; usage counts are exposed through `X-AskHype-*` response headers.
+Registered free users may reserve 10 prompts and Premium users 200 prompts in the immediately preceding 24 hours. The guest limit remains server-configurable. `completed` events count for 24 hours; `reserved` events count for up to 10 minutes while generation is in progress. `failed` events and reservations automatically marked stale do not count.
+
+When a prompt quota is exhausted, `POST /api/chat` returns HTTP 429 with a structured `detail.code` of `prompt_limit_reached`. Successful `ChatResponse` bodies remain unchanged; usage counts are exposed through `X-AskHype-*` response headers. `reset_at` is the time when the oldest currently counted event leaves the rolling window, or `null` when no events count.
 
 `GET /api/mock-subscription`
 
@@ -250,8 +252,8 @@ Supported environment variables:
 - `SUPABASE_SECRET_KEY`
 - `ANONYMOUS_ID_PEPPER`
 - `ANONYMOUS_PROMPT_LIMIT`
-- `FREE_MONTHLY_PROMPT_LIMIT`
-- `PREMIUM_MONTHLY_PROMPT_LIMIT`
+- `FREE_ROLLING_24H_PROMPT_LIMIT`
+- `PREMIUM_ROLLING_24H_PROMPT_LIMIT`
 - `MOCK_SUBSCRIPTIONS_ENABLED`
 
 Safe default values are listed in `.env.example`.
@@ -259,6 +261,34 @@ Safe default values are listed in `.env.example`.
 Set `QUOTA_ENFORCEMENT_ENABLED=true` only when Supabase server configuration is present. `SUPABASE_SECRET_KEY` and `ANONYMOUS_ID_PEPPER` are server-only secrets and must not be exposed to the frontend.
 
 Set `MOCK_SUBSCRIPTIONS_ENABLED=false` to disable the mock Premium activation endpoints safely.
+
+The legacy `FREE_MONTHLY_PROMPT_LIMIT` and `PREMIUM_MONTHLY_PROMPT_LIMIT` names remain accepted for one transition period when their new rolling-window equivalents are not set. The authenticated limits are product contract values and must remain 10 and 200 in production. Reservations have a fixed 10-minute stale timeout in both the application and migration.
+
+## Supabase Quota Migration
+
+The repository owns the minimum quota schema in `supabase/migrations/202609190001_hype_ask_002_rolling_quotas.sql`. It creates or extends `public.profiles` and `public.usage_events`, adds indexes, enables RLS, and installs service-role-only `reserve_prompt_usage` and `finalize_prompt_usage` RPCs.
+
+Apply migrations to a linked staging project from the repository root:
+
+```bash
+supabase db push
+```
+
+If the Supabase CLI is not part of your deployment workflow, review and run the migration once through the staging SQL editor before production. The migration preserves rows and uses guarded DDL. It intentionally aborts if existing profile plans are not `free`/`premium`, usage statuses are unsupported, or a usage row does not have exactly one of `user_id` and `anonymous_id_hash`. Resolve those incompatibilities with an explicit, reviewed data migration; do not rename or copy a legacy raw anonymous-ID column automatically.
+
+The migration assumes an existing table does not have additional required columns without defaults that would reject the documented inserts, and that `profiles.user_id` remains its conflict key. Inspect those properties in staging before applying it to a project whose schema predates these repository migrations.
+
+The reservation RPC serializes requests per user or anonymous hash with a transaction-scoped advisory lock. It derives authenticated limits from the server-owned profile plan, ignores the caller's anonymous limit for authenticated users, and performs expiration, count, and insert in one transaction. Browser roles cannot execute either quota RPC or write usage events. Authenticated users can read their profile and update only preference columns; grants prevent them from changing `plan` or mock-Premium eligibility.
+
+Staging verification after migration:
+
+1. Confirm browser `anon` and `authenticated` clients cannot insert/update/delete `usage_events` or execute either RPC.
+2. Send 11 concurrent free-user reservations and confirm exactly 10 succeed; repeat with 201 Premium reservations and confirm exactly 200 succeed.
+3. Finalize one reservation as `failed` and confirm the next reservation succeeds.
+4. Insert controlled staging events around the 24-hour boundary and verify `/api/usage` counts only events inside the window.
+5. Leave a reservation unfinished for more than 10 minutes and confirm a subsequent reservation marks it failed with `failure_code=stale_reservation`.
+
+Rollback should restore the previous backend before removing database objects. The additive tables and columns can remain safely. If the RPCs must be disabled immediately, revoke their `service_role` execute grants. Dropping tables or columns is deliberately not included because that could destroy production data; destructive rollback requires a separate reviewed migration and backup.
 
 ## Demo Premium Administration
 
@@ -370,9 +400,7 @@ The report records provider success, summaries, recommendation titles and locati
 
 ## Limitations
 
-- No authentication
-- No database
-- No Supabase integration
+- Supabase schema and RPC behavior still require staging verification
 - No RAG pipeline
 - No external API calls
 - No web search or live source verification

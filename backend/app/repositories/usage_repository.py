@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -15,6 +15,7 @@ class UsageReservation:
     used: int
     limit: int
     remaining: int
+    reset_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class UsageStatus:
     used: int
     limit: int
     remaining: int
+    reset_at: datetime | None = None
 
 
 class UsageRepository(Protocol):
@@ -32,9 +34,10 @@ class UsageRepository(Protocol):
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        plan: str,
         limit: int,
-        period_start: datetime,
+        window_start: datetime,
+        reserved_at: datetime,
+        stale_before: datetime,
         request_id: UUID,
     ) -> UsageReservation: ...
 
@@ -53,7 +56,8 @@ class UsageRepository(Protocol):
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        period_start: datetime,
+        window_start: datetime,
+        stale_before: datetime,
         limit: int,
     ) -> UsageStatus: ...
 
@@ -79,19 +83,18 @@ class SupabaseUsageRepository:
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        plan: str,
         limit: int,
-        period_start: datetime,
+        window_start: datetime,
+        reserved_at: datetime,
+        stale_before: datetime,
         request_id: UUID,
     ) -> UsageReservation:
         response = self.client.rpc(
             "reserve_prompt_usage",
             {
                 "p_user_id": str(user_id) if user_id else None,
-                "p_anonymous_id": anonymous_id_hash,
-                "p_plan": plan,
+                "p_anonymous_id_hash": anonymous_id_hash,
                 "p_limit": limit,
-                "p_period_start": period_start.isoformat(),
                 "p_request_id": str(request_id),
             },
         ).execute()
@@ -102,6 +105,7 @@ class SupabaseUsageRepository:
             used=int(data.get("used", 0)),
             limit=int(data.get("limit", limit)),
             remaining=max(int(data.get("remaining", 0)), 0),
+            reset_at=_parse_datetime(data.get("reset_at")),
         )
 
     async def finalize_prompt_usage(
@@ -129,20 +133,24 @@ class SupabaseUsageRepository:
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        period_start: datetime,
+        window_start: datetime,
+        stale_before: datetime,
         limit: int,
     ) -> UsageStatus:
-        query = self.client.table("usage_events").select("id", count="exact").gte(
-            "period_start",
-            period_start.isoformat(),
-        ).in_("status", ["reserved", "completed"])
+        query = self.client.table("usage_events").select("id, created_at").gte(
+            "created_at", window_start.isoformat()
+        ).or_(f"status.eq.completed,and(status.eq.reserved,created_at.gte.{stale_before.isoformat()})")
         if user_id:
             query = query.eq("user_id", str(user_id))
         else:
-            query = query.eq("anonymous_id", anonymous_id_hash)
+            query = query.eq("anonymous_id_hash", anonymous_id_hash)
         response = query.execute()
-        used = int(getattr(response, "count", 0) or 0)
-        return UsageStatus(used=used, limit=limit, remaining=max(limit - used, 0))
+        rows = getattr(response, "data", None) or []
+        used = len(rows)
+        created = [_parse_datetime(row.get("created_at")) for row in rows if isinstance(row, dict)]
+        oldest = min((value for value in created if value is not None), default=None)
+        reset_at = oldest + timedelta(hours=24) if oldest else None
+        return UsageStatus(used=used, limit=limit, remaining=max(limit - used, 0), reset_at=reset_at)
 
 
 def _first_row(value):
@@ -151,6 +159,15 @@ def _first_row(value):
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 class InMemoryUsageRepository:
@@ -166,12 +183,15 @@ class InMemoryUsageRepository:
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        plan: str,
         limit: int,
-        period_start: datetime,
+        window_start: datetime,
+        reserved_at: datetime,
+        stale_before: datetime,
         request_id: UUID,
     ) -> UsageReservation:
-        used = self._count(user_id, anonymous_id_hash, period_start)
+        self._expire_stale_reservations(stale_before)
+        matching = self._matching_events(user_id, anonymous_id_hash, window_start, stale_before)
+        used = len(matching)
         if used >= limit:
             return UsageReservation(
                 allowed=False,
@@ -179,15 +199,15 @@ class InMemoryUsageRepository:
                 used=used,
                 limit=limit,
                 remaining=0,
+                reset_at=self._reset_at(matching),
             )
 
         event_id = request_id
         self.events[event_id] = {
             "user_id": user_id,
             "anonymous_id_hash": anonymous_id_hash,
-            "period_start": period_start,
+            "created_at": reserved_at,
             "status": "reserved",
-            "plan": plan,
         }
         used += 1
         return UsageReservation(
@@ -196,6 +216,7 @@ class InMemoryUsageRepository:
             used=used,
             limit=limit,
             remaining=max(limit - used, 0),
+            reset_at=self._reset_at(matching + [self.events[event_id]]),
         )
 
     async def finalize_prompt_usage(
@@ -209,9 +230,6 @@ class InMemoryUsageRepository:
     ) -> None:
         event = self.events.get(usage_event_id)
         if event is None:
-            return
-        if status == "failed":
-            self.events.pop(usage_event_id, None)
             return
         event.update(
             {
@@ -227,26 +245,47 @@ class InMemoryUsageRepository:
         *,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        period_start: datetime,
+        window_start: datetime,
+        stale_before: datetime,
         limit: int,
     ) -> UsageStatus:
-        used = self._count(user_id, anonymous_id_hash, period_start)
-        return UsageStatus(used=used, limit=limit, remaining=max(limit - used, 0))
+        self._expire_stale_reservations(stale_before)
+        matching = self._matching_events(user_id, anonymous_id_hash, window_start, stale_before)
+        used = len(matching)
+        return UsageStatus(
+            used=used,
+            limit=limit,
+            remaining=max(limit - used, 0),
+            reset_at=self._reset_at(matching),
+        )
 
-    def _count(
+    def _matching_events(
         self,
         user_id: UUID | None,
         anonymous_id_hash: str | None,
-        period_start: datetime,
-    ) -> int:
-        return sum(
-            1
+        window_start: datetime,
+        stale_before: datetime,
+    ) -> list[dict[str, object]]:
+        return [
+            event
             for event in self.events.values()
-            if event.get("status") in {"reserved", "completed"}
-            and event.get("period_start") == period_start
+            if isinstance(event.get("created_at"), datetime)
+            and event["created_at"] >= window_start
+            and (event.get("status") == "completed" or (event.get("status") == "reserved" and event["created_at"] >= stale_before))
             and (
                 event.get("user_id") == user_id
                 if user_id is not None
                 else event.get("anonymous_id_hash") == anonymous_id_hash
             )
-        )
+        ]
+
+    def _expire_stale_reservations(self, stale_before: datetime) -> None:
+        for event in self.events.values():
+            created_at = event.get("created_at")
+            if event.get("status") == "reserved" and isinstance(created_at, datetime) and created_at < stale_before:
+                event.update({"status": "failed", "failure_code": "stale_reservation"})
+
+    @staticmethod
+    def _reset_at(events: list[dict[str, object]]) -> datetime | None:
+        created = [event["created_at"] for event in events if isinstance(event.get("created_at"), datetime)]
+        return min(created) + timedelta(hours=24) if created else None

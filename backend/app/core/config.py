@@ -1,4 +1,4 @@
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,8 +18,16 @@ class Settings(BaseSettings):
     supabase_secret_key: SecretStr | None = None
     anonymous_id_pepper: SecretStr | None = None
     anonymous_prompt_limit: int = Field(default=3, gt=0)
-    free_monthly_prompt_limit: int = Field(default=10, gt=0)
-    premium_monthly_prompt_limit: int = Field(default=200, gt=0)
+    free_rolling_24h_prompt_limit: int = Field(
+        default=10,
+        gt=0,
+        validation_alias=AliasChoices("FREE_ROLLING_24H_PROMPT_LIMIT", "FREE_MONTHLY_PROMPT_LIMIT"),
+    )
+    premium_rolling_24h_prompt_limit: int = Field(
+        default=200,
+        gt=0,
+        validation_alias=AliasChoices("PREMIUM_ROLLING_24H_PROMPT_LIMIT", "PREMIUM_MONTHLY_PROMPT_LIMIT"),
+    )
     mock_subscriptions_enabled: bool = True
 
     model_config = SettingsConfigDict(

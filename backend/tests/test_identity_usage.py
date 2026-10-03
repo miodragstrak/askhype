@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -116,11 +116,13 @@ def test_quota_periods_are_utc() -> None:
     free = usage_window("free", now)
     premium = usage_window("premium", now)
 
-    assert guest.period_start == datetime(2020, 1, 1, tzinfo=UTC)
-    assert guest.reset_at is None
-    assert free.period_start == datetime(2026, 8, 1, tzinfo=UTC)
-    assert free.reset_at == datetime(2026, 9, 1, tzinfo=UTC)
-    assert premium.period_start == datetime(2026, 8, 1, tzinfo=UTC)
+    expected_start = now - timedelta(hours=24)
+    assert guest.window_start == expected_start
+    assert free.window_start == expected_start
+    assert premium.window_start == expected_start
+    assert guest.limit == settings.anonymous_prompt_limit
+    assert free.limit == 10
+    assert premium.limit == 200
 
 
 def test_quota_allowed_and_exhausted_flow() -> None:
@@ -147,4 +149,25 @@ def test_quota_allowed_and_exhausted_flow() -> None:
     assert payload["identity"] == "guest"
     assert payload["remaining"] == 0
     assert payload["actions"] == ["sign_up", "sign_in", "view_premium"]
-    settings.anonymous_prompt_limit = 3
+
+
+def test_failed_generation_releases_reserved_quota() -> None:
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=UTC)
+    identity = resolve_guest_identity("67676767-6767-4767-8767-676767676767")
+    repository = InMemoryUsageRepository()
+    service = UsageService(repository, clock=lambda: now)
+
+    reserved = asyncio.run(service.reserve(identity))
+    asyncio.run(
+        service.finalize(
+            reserved.usage_event_id,
+            status="failed",
+            provider=None,
+            conversation_id=None,
+            failure_code="timeout",
+        )
+    )
+
+    snapshot = asyncio.run(service.get_status(identity))
+    assert snapshot.used == 0
+    assert repository.events[reserved.usage_event_id]["status"] == "failed"
