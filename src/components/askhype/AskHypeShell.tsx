@@ -9,7 +9,9 @@ import { storageUtils } from '../../utils';
 import { AskHypeLogo } from '../branding/AskHypeLogo';
 import {
   conversationTitle,
+  loadActiveConversationId,
   loadConversations,
+  saveActiveConversationId,
   saveConversations,
   sortConversations,
 } from '../../utils/conversation-storage';
@@ -28,7 +30,7 @@ export const AskHypeShell = () => {
   const { session, user, profile } = useAuth();
   const { usage, applyUsageSnapshot, refreshUsage } = useUsage();
   const [conversations, setConversations] = useState<LocalConversation[]>(loadConversations);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => loadActiveConversationId(conversations));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,10 @@ export const AskHypeShell = () => {
   useEffect(() => {
     saveConversations(conversations);
   }, [conversations]);
+
+  useEffect(() => {
+    saveActiveConversationId(activeId);
+  }, [activeId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });

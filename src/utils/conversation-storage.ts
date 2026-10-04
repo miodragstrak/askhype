@@ -1,6 +1,7 @@
 import type { LocalConversation, LocalMessage } from '../types/conversation';
 
 const STORAGE_KEY = 'askhype:conversations:v1';
+const ACTIVE_CONVERSATION_KEY = 'askhype:active-conversation:v1';
 
 const isMessage = (value: unknown): value is LocalMessage => {
   if (!value || typeof value !== 'object') return false;
@@ -41,6 +42,27 @@ export const saveConversations = (conversations: LocalConversation[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sortConversations(conversations)));
   } catch {
     // The active conversation remains usable when storage is unavailable.
+  }
+};
+
+export const loadActiveConversationId = (conversations: LocalConversation[]): string | null => {
+  try {
+    const activeId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+    return conversations.some((conversation) => conversation.id === activeId) ? activeId : null;
+  } catch {
+    return null;
+  }
+};
+
+export const saveActiveConversationId = (activeId: string | null) => {
+  try {
+    if (activeId === null) {
+      localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    } else {
+      localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId);
+    }
+  } catch {
+    // The active selection remains usable when storage is unavailable.
   }
 };
 
