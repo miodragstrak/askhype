@@ -1,7 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import {
   HomePage,
-  ChatPage,
   ExplorePage,
   RecommendationDetailPage,
   SavedPage,
@@ -16,7 +15,7 @@ export const Router = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat" element={<Navigate to="/" replace />} />
         <Route path="/explore" element={<ExplorePage />} />
         <Route path="/recommendations/:id" element={<RecommendationDetailPage />} />
         <Route path="/saved" element={<SavedPage />} />
@@ -24,9 +23,14 @@ export const Router = () => {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/premium" element={<PremiumPage />} />
       </Routes>
-      <BottomNavigation />
+      <LegacyBottomNavigation />
     </BrowserRouter>
   );
+};
+
+const LegacyBottomNavigation = () => {
+  const { pathname } = useLocation();
+  return pathname === '/' || pathname === '/chat' ? null : <BottomNavigation />;
 };
 
 export default Router;
