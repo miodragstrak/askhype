@@ -20,6 +20,7 @@ from app.providers.gemini import (
     validate_schema_required_properties,
 )
 from app.schemas.chat import ChatRequest
+from app.services.hype_retrieval import HypeContext, HypeDocument
 
 
 class FakeResponse:
@@ -107,6 +108,54 @@ def test_uuid_conversation_id_is_generated_when_absent() -> None:
 
     assert response.conversation_id.startswith("conv_")
     assert len(response.conversation_id) > len("conv_")
+
+
+def test_hype_context_is_grounded_and_only_retrieved_urls_survive() -> None:
+    checked_at = datetime(2026, 10, 4, 12, tzinfo=UTC)
+    url = "https://hypetv.rs/program/"
+    context = HypeContext("shows", checked_at.date(), [HypeDocument("Hype program", url, "Potvrdjen Hype TV program.", checked_at, published_at=checked_at)])
+    payload = _valid_payload()
+    payload["recommendations"][0]["source_url"] = url
+    payload["recommendations"][0]["estimated_price"] = "Invented price"
+    payload["recommendations"][0]["date_or_duration"] = "Invented schedule"
+    payload["recommendations"][1]["source_url"] = "https://hypetv.rs/not-retrieved/"
+    payload["recommendations"][2]["source_url"] = url
+    models = FakeModels(FakeResponse(parsed=payload))
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Hype TV program"), hype_context=context))
+
+    assert len(response.recommendations) == 1
+    assert response.recommendations[0].title == "Hype program"
+    assert response.recommendations[0].short_description == "Potvrdjen Hype TV program."
+    assert response.recommendations[0].source_url == url
+    assert response.recommendations[0].estimated_price is None
+    assert response.recommendations[0].image_url is None
+    assert response.recommendations[0].location == "Lokacija nije potvrđena"
+    assert response.recommendations[0].date_or_duration == "Objavljeno: 2026-10-04"
+    assert response.answer_type == "hype_content"
+    assert response.sources[0].url == url
+    assert response.sources[0].last_verified == checked_at
+    call = models.calls[0]
+    assert "Potvrdjen Hype TV program." in call["contents"]
+    assert "untrusted website data" in call["contents"]
+    assert "return 0 to 3" in call["config"].system_instruction
+    assert "Do not invent" in call["config"].system_instruction
+    schema = call["config"].response_json_schema
+    assert schema["properties"]["recommendations"]["minItems"] == 0
+    assert schema["properties"]["recommendations"]["maxItems"] == 3
+
+
+def test_hype_without_evidence_can_return_an_honest_empty_response() -> None:
+    payload = _valid_payload()
+    payload["recommendations"] = []
+    payload["sources"] = []
+    payload["summary"] = "Nema dovoljno Hype izvora za potvrdu."
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(parsed=payload))))
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Hype koncerti"), hype_context=HypeContext("events", datetime.now(UTC).date())))
+    assert response.recommendations == []
+    assert response.sources == []
+    assert response.summary == payload["summary"]
 
 
 def test_missing_gemini_api_key_raises_configuration_error() -> None:

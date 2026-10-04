@@ -1,8 +1,13 @@
 const EXAMPLES = [
   'Gde da izađem večeras u Beogradu?',
   'Isplaniraj mi vikend na Tari.',
-  'Predloži miran restoran za dvoje.',
-  'Šta vredi posetiti u Novom Sadu?',
+];
+
+const HYPE_EXAMPLES = [
+  'Šta ima novo na Hype TV?',
+  'Koje Hype emisije vredi pogledati?',
+  'Koji Hype koncerti uskoro dolaze?',
+  'Ko su izvođači Hype Production-a?',
 ];
 
 interface EmptyConversationProps {
@@ -16,6 +21,18 @@ export const EmptyConversation = ({ onSelect }: EmptyConversationProps) => (
       Pitaj za mesta, događaje, hranu ili sledeće putovanje.
     </p>
     <div className="mt-8 flex max-w-xl flex-wrap justify-center gap-2">
+      {HYPE_EXAMPLES.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onSelect(prompt)}
+          className="min-h-10 rounded-full border border-blue-200 bg-blue-50/50 px-4 py-2 text-sm text-blue-800 transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-700 focus:ring-offset-2"
+        >
+          {prompt}
+        </button>
+      ))}
+    </div>
+    <div className="mt-3 flex max-w-xl flex-wrap justify-center gap-2">
       {EXAMPLES.map((prompt) => (
         <button
           key={prompt}

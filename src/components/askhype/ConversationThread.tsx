@@ -15,6 +15,19 @@ interface ConversationThreadProps {
   onPremium: () => void;
 }
 
+const hypeSourceOwner = (url: string): string | null => {
+  try {
+    const source = new URL(url);
+    if (!['https:', 'http:'].includes(source.protocol)) return null;
+    const host = source.hostname.replace(/^www\./, '');
+    if (host === 'hypetv.rs') return 'Hype TV';
+    if (host === 'hypeproduction.rs') return 'Hype Production';
+  } catch {
+    return null;
+  }
+  return null;
+};
+
 const AssistantResponse = ({
   response,
   onFollowUp,
@@ -79,10 +92,17 @@ const AssistantResponse = ({
               href={source.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 underline decoration-slate-300 underline-offset-4 hover:text-slate-950"
+              className="inline-flex max-w-full flex-wrap items-center gap-1 underline decoration-slate-300 underline-offset-4 hover:text-slate-950"
             >
               {source.title}
               <ExternalLink size={11} />
+              {hypeSourceOwner(source.url) ? (
+                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 no-underline">
+                  {hypeSourceOwner(source.url)}
+                </span>
+              ) : response.answer_type === 'hype_content' ? (
+                <span className="text-[10px] text-slate-500">Spoljni izvor</span>
+              ) : null}
             </a>
           ) : (
             <span key={source.title}>{source.title}</span>

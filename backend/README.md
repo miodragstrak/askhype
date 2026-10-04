@@ -304,7 +304,7 @@ Activation changes only `public.profiles.plan` for the authenticated user. Deact
 
 ## Mock Provider Mode
 
-`AI_PROVIDER=mock` is the default. The mock provider is deterministic, uses no network, and supports demo scenarios for nightlife, events, travel planning, food, restaurants, and a generic AskHype fallback.
+`AI_PROVIDER=mock` is the default. Generic requests remain deterministic and use no network. Hype-related requests run the bounded Hype retrieval layer first; the mock provider then returns excerpts from actual retrieved content without calling an AI model.
 
 Keep mock mode active with:
 
@@ -341,7 +341,7 @@ When Gemini mode is enabled without a key, `/api/chat` returns a clear 503 confi
 
 ## Structured Output
 
-Gemini is asked for an internal structured JSON payload containing only model-generated fields: answer type, summary, exactly 3 recommendations, 2 to 4 follow-up actions, and source labels. The backend then validates and normalizes that payload into the existing `ChatResponse`, adding application-owned fields such as `conversation_id`, `provider`, and `generated_at`.
+For generic requests, Gemini is asked for an internal structured JSON payload containing only model-generated fields: answer type, summary, exactly 3 recommendations, 2 to 4 follow-up actions, and source labels. Hype requests allow 0 to 3 supported recommendations so the model is never required to invent extra items. Both paths use the existing frontend-facing `ChatResponse` schema.
 
 The Gemini request uses a constrained JSON schema derived from the internal Pydantic model. Schema sanitization is context-aware: application field names inside `properties` mappings are never removed, even if a field is named `title`, `default`, or `additionalProperties`. Unsupported schema metadata such as `default` is removed before SDK submission when needed, and `required` entries are checked against sibling `properties` before any request is made. Application-side Pydantic validation remains authoritative after generation.
 
@@ -351,11 +351,31 @@ The backend rejects malformed JSON, empty required content, duplicate or out-of-
 
 AskHype treats a place named in the current user message as more important than the selected application location. For example, if the request context says `Beograd` but the message asks `Šta da posetim u Boru?`, the model is instructed to answer for Bor, not Beograd. When neither the message nor request context gives a clear location, the assistant should ask a short clarification.
 
-The backend does not run a fragile city parser in this step. It passes the selected app location plus an explicit precedence rule to Gemini and relies on the model to interpret natural-language locations. Human review is still required for factual accuracy because there is no live data, maps, web search, database, scraping, or RAG.
+The backend passes the selected app location plus an explicit precedence rule to Gemini and relies on the model to interpret natural-language locations. Generic requests have no verified local data or general web search. Hype requests receive only the bounded source excerpts described below; model-written summaries still require factual review.
 
 ## Source Verification
 
-This step does not include web search, grounding, a database, RAG, scraping, or external tourism APIs. Gemini responses must not claim live verification. Source labels may describe unverified AI guidance, and `last_verified` should stay `null` unless a future application-side verification event exists.
+Generic requests have no application-side web verification: model-generated source URLs remain `null`, and model memory must not be described as verified. Hype requests retain only citation URLs supplied by retrieval. Their `last_verified` timestamps are application-owned fetch times, including the original fetch time when a cached page is reused; they do not guarantee ticket availability or editorial accuracy.
+
+## Hype-first Retrieval (HYPE-ASK-005)
+
+The empty conversation has four restrained blue Hype suggestions and two neutral generic suggestions. Both use the existing prompt submission flow. Blue source labels identify Hype TV or Hype Production; the composer, primary controls, navigation, and general recommendation cards retain their existing styling.
+
+`ChatService` detects explicit Hype/Hype TV/Hype Production queries and passes a separate `HypeContext` to the configured provider. Generic requests bypass retrieval entirely. No request/response, conversation-storage, auth, quota, or Supabase schema is changed.
+
+The demo retrieval layer uses only HTTPS on `hypetv.rs` and `hypeproduction.rs`, including their `www` aliases. It fetches two category-specific entry points and at most six linked detail pages. TV news and programs use public RSS feeds (or the site's RSS search for more specific queries); Production artists, shows, and concerts use its public catalog pages. TV is prioritized for news/programs, Production for artists/concerts. The layer is not a crawler, persistent index, vector store, or full RAG system.
+
+Bounds: 4-second HTTP timeouts, a 12-second overall retrieval budget, at most two redirects per page, 1 MB decoded content per page, three context documents, and a 16-page in-process cache with a five-minute lifetime. Redirect destinations and extracted links must remain inside the allowlist. Parsing uses XML for RSS and Beautiful Soup for HTML/JSON-LD; website text is passed as untrusted data, never as instructions.
+
+Publication and event dates remain separate. Upcoming events require a fetched detail page with an explicit numeric/Serbian-text date or JSON-LD `startDate`, on or after the current Belgrade date. Past, cancelled, undated, and conflicting-date items are excluded from upcoming results. Historical queries can include past entries. The model may select only retrieved URLs; displayed card titles, excerpts, locations, and dates are copied from those documents, while unverified model prices/images are removed. Gemini writes the summary from the supplied context. Prices, booking availability, model summary accuracy, and site editorial accuracy are not verified.
+
+If evidence is limited or retrieval fails, Hype answers may contain fewer than three cards or no cards. Mock mode reports the missing evidence rather than using its fictional generic event catalog. Gemini may give clearly labelled unverified general background, but no unsupported Hype facts, events, or invented external citation URLs. There is no general external search integration in this milestone. Only currently indexed feed/catalog content and a bounded sample of linked pages are covered; JavaScript-only content and the full archives are not indexed. Follow-up prompts name Hype explicitly because backend multi-turn memory is still unavailable.
+
+Manual smoke tests with the backend running:
+
+1. Click `Šta ima novo na Hype TV?`; confirm source links and `Hype TV` labels.
+2. Ask `Koji Hype koncerti uskoro dolaze?`; confirm Production sources and explicit future dates, or an honest insufficient-evidence response.
+3. Ask a generic restaurant/travel question; confirm the existing three-card behavior and neutral styling.
 
 ## Conversation Context
 
@@ -402,6 +422,6 @@ The report records provider success, summaries, recommendation titles and locati
 
 - Supabase schema and RPC behavior still require staging verification
 - No RAG pipeline
-- No external API calls
+- No general web search or external tourism/event API integration; public Hype HTTP retrieval is bounded as described above
 - No web search or live source verification
 - No stored multi-turn semantic memory

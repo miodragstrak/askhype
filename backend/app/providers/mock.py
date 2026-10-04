@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
+from app.services.hype_retrieval import HypeContext
+from app.services.hype_response import build_hype_response
 
 
 MOCK_GENERATED_AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -11,7 +13,13 @@ MOCK_LAST_VERIFIED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 class MockAIProvider:
     provider_name = "mock"
 
-    async def generate_chat_response(self, request: ChatRequest) -> ChatResponse:
+    async def generate_chat_response(self, request: ChatRequest, *, hype_context: HypeContext | None = None) -> ChatResponse:
+        if hype_context is not None:
+            return build_hype_response(
+                hype_context,
+                conversation_id=request.conversation_id or self._conversation_id(request),
+                provider=self.provider_name,
+            )
         scenario = self._detect_scenario(request.message)
         conversation_id = request.conversation_id or self._conversation_id(request)
 
