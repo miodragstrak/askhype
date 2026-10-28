@@ -446,6 +446,43 @@ python scripts/evaluate_demo_locations.py --provider gemini --output reports/bal
 
 The report records provider success, summaries, recommendation titles and locations, source URL presence, unverified-data caveats, timing, and pending manual review fields. It does not automatically declare factual correctness.
 
+## Production Container
+
+Build the backend image from the repository root. The build context is limited to `backend/`, and `.dockerignore` excludes local environments, tests, reports, caches, and editor files:
+
+```bash
+docker build -t askhype-backend:local backend
+```
+
+Run a safe local mock container:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e APP_ENV=development \
+  -e AI_PROVIDER=mock \
+  -e QUOTA_ENFORCEMENT_ENABLED=false \
+  -e MOCK_SUBSCRIPTIONS_ENABLED=true \
+  askhype-backend:local
+```
+
+Production uses the same image with the environment contract documented above. Inject `APP_ENV=production`, Gemini and quota settings, frontend origins, `SUPABASE_URL`, and all required secrets at runtime, preferably with the target platform's secret manager or an external `--env-file`. No `.env` file or credential is copied into the image.
+
+```bash
+docker run --rm -p 8000:8000 \
+  --env-file /secure/path/askhype-backend.env \
+  askhype-backend:local
+```
+
+The production runtime must provide `APP_ENV`, `AI_PROVIDER`, `QUOTA_ENFORCEMENT_ENABLED`, all three prompt limits, `MOCK_SUBSCRIPTIONS_ENABLED`, `FRONTEND_ORIGIN` and/or `FRONTEND_ORIGINS`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ANONYMOUS_ID_PEPPER`, and `GEMINI_API_KEY`. The configuration section above defines their required production values.
+
+The image exposes port `8000`; set `PORT` at runtime when another container port is required. Its production command is equivalent to:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+The container runs as the non-root `askhype` user and includes a standard-library Docker healthcheck for `GET /api/health`. The same endpoint is available to an external orchestrator at `http://<host>:<port>/api/health`.
+
 ## Limitations
 
 - Supabase schema and RPC behavior still require staging verification
