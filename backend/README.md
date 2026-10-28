@@ -241,6 +241,7 @@ Supported environment variables:
 - `APP_ENV`
 - `API_PREFIX`
 - `FRONTEND_ORIGIN`
+- `FRONTEND_ORIGINS`
 - `AI_PROVIDER`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
@@ -256,13 +257,40 @@ Supported environment variables:
 - `PREMIUM_ROLLING_24H_PROMPT_LIMIT`
 - `MOCK_SUBSCRIPTIONS_ENABLED`
 
-Safe default values are listed in `.env.example`.
+Safe local-development defaults are listed in `.env.example`. `FRONTEND_ORIGINS` is an optional comma-separated list of exact origins, for example `https://app.example,https://admin.example`. It is combined with the backward-compatible `FRONTEND_ORIGIN`, normalized without trailing slashes, and deduplicated. Origins must contain only a scheme and host; paths, query strings, fragments, and production wildcards are rejected.
 
 Set `QUOTA_ENFORCEMENT_ENABLED=true` only when Supabase server configuration is present. `SUPABASE_SECRET_KEY` and `ANONYMOUS_ID_PEPPER` are server-only secrets and must not be exposed to the frontend.
 
 Set `MOCK_SUBSCRIPTIONS_ENABLED=false` to disable the mock Premium activation endpoints safely.
 
 The legacy `FREE_MONTHLY_PROMPT_LIMIT` and `PREMIUM_MONTHLY_PROMPT_LIMIT` names remain accepted for one transition period when their new rolling-window equivalents are not set. The authenticated limits are product contract values and must remain 10 and 200 in production. Reservations have a fixed 10-minute stale timeout in both the application and migration.
+
+### Environment Profiles
+
+| Environment | Intended configuration |
+| --- | --- |
+| `development` | Defaults to mock AI, process-local quota storage, enabled mock subscriptions, and `http://localhost:5173` when no frontend origin is set. No production secret is required. |
+| `staging` | Uses explicit staging URLs and credentials. Production-like Gemini and durable quotas are recommended, but staging may intentionally use mock integrations for isolated testing. |
+| `production` | Requires Gemini, durable Supabase quota enforcement, explicit frontend origins, all server secrets, disabled mock subscriptions, and limits of 5 guest / 10 free / 200 Premium prompts. Unsafe settings stop application import/startup with a combined validation error. |
+
+Production configuration must provide:
+
+```dotenv
+APP_ENV=production
+AI_PROVIDER=gemini
+QUOTA_ENFORCEMENT_ENABLED=true
+ANONYMOUS_PROMPT_LIMIT=5
+FREE_ROLLING_24H_PROMPT_LIMIT=10
+PREMIUM_ROLLING_24H_PROMPT_LIMIT=200
+MOCK_SUBSCRIPTIONS_ENABLED=false
+FRONTEND_ORIGIN=https://your-frontend.example
+GEMINI_API_KEY=...
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=...
+ANONYMOUS_ID_PEPPER=...
+```
+
+`GEMINI_API_KEY`, `SUPABASE_SECRET_KEY`, and `ANONYMOUS_ID_PEPPER` are backend-only secrets. Never expose them with a `VITE_` prefix. The frontend only receives `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and the public `VITE_SUPABASE_PUBLISHABLE_KEY`.
 
 ## Supabase Quota Migration
 

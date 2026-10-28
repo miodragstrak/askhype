@@ -50,7 +50,7 @@ def test_usage_endpoint_and_chat_headers_for_guest() -> None:
     assert before.json()["used"] == 0
     assert chat.status_code == 200
     assert chat.headers["X-AskHype-Plan"] == "guest"
-    assert chat.headers["X-AskHype-Usage-Limit"] == "3"
+    assert chat.headers["X-AskHype-Usage-Limit"] == "5"
 
 
 def test_quota_exhausted_returns_structured_429(monkeypatch) -> None:

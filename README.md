@@ -105,7 +105,7 @@ index.html              # HTML entry point
 
 ## Local Full-Stack Development
 
-AskHype includes a FastAPI backend under `backend/`. The Chat page calls the backend mock chat endpoint; `AI_PROVIDER` is still `mock`, and no external AI API is used.
+AskHype includes a FastAPI backend under `backend/`. Local development defaults to the deterministic mock provider; production configuration requires Gemini and durable Supabase quota enforcement.
 
 Create frontend environment configuration from the repository root:
 
@@ -122,6 +122,8 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 Vercel must also define `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for production builds.
+
+Only these `VITE_` values are public browser configuration. Keep `GEMINI_API_KEY`, `SUPABASE_SECRET_KEY`, and `ANONYMOUS_ID_PEPPER` in the backend environment. See `backend/.env.example` and `backend/README.md` for development, staging, and production requirements.
 
 Start the backend from `backend/`:
 
@@ -230,7 +232,7 @@ Set `MOCK_SUBSCRIPTIONS_ENABLED=false` on the backend to disable the demo endpoi
 ## Known Limitations
 
 1. Images from external placeholder service
-2. AI_PROVIDER is still mock
+2. Local development uses mock AI unless Gemini is explicitly configured
 3. Manual location selection only
 4. Client-side filtering only
 5. No pagination
