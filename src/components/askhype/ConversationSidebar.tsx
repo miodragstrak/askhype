@@ -27,21 +27,21 @@ export const ConversationSidebar = ({
         type="button"
         aria-label="Zatvori istoriju"
         onClick={onClose}
-        className="fixed inset-0 z-30 bg-slate-950/30 md:hidden"
+        className="fixed inset-0 z-30 bg-chat-surface/70 md:hidden"
       />
     )}
     <aside
       aria-label="Istorija razgovora"
-      className={`fixed bottom-0 left-0 top-0 z-40 flex w-[min(86vw,300px)] flex-col border-r border-slate-200 bg-slate-50 transition-transform md:static md:z-auto md:w-72 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      className={`fixed bottom-0 left-0 top-0 z-40 flex w-[min(86vw,300px)] flex-col border-r border-chat-border bg-chat-surface transition-transform md:static md:z-auto md:w-72 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
     >
-      <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4 md:hidden">
-        <span className="text-sm font-semibold text-slate-900">Razgovori</span>
+      <div className="flex h-16 items-center justify-between border-b border-chat-border px-4 md:hidden">
+        <span className="text-sm font-semibold text-chat-text">Razgovori</span>
         <button
           type="button"
           onClick={onClose}
           aria-label="Zatvori"
           title="Zatvori"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-950"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-chat-muted hover:bg-chat-hover focus:outline-none focus:ring-2 focus:ring-hype-yellow"
         >
           <X size={19} />
         </button>
@@ -50,7 +50,7 @@ export const ConversationSidebar = ({
         <button
           type="button"
           onClick={onNew}
-          className="flex w-full items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 transition hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2"
+          className="flex w-full items-center gap-3 rounded-lg border border-chat-outline bg-chat-elevated px-3 py-2.5 text-sm font-semibold text-chat-text transition hover:bg-chat-hover focus:outline-none focus:ring-2 focus:ring-hype-yellow focus:ring-offset-2 focus:ring-offset-chat-surface"
         >
           <Plus size={17} />
           Novi razgovor
@@ -70,7 +70,7 @@ export const ConversationSidebar = ({
             ))}
           </div>
         ) : (
-          <p className="px-3 py-5 text-sm leading-6 text-slate-500">Tvoji razgovori će se pojaviti ovde.</p>
+          <p className="px-3 py-5 text-sm leading-6 text-chat-muted">Tvoji razgovori će se pojaviti ovde.</p>
         )}
       </div>
     </aside>

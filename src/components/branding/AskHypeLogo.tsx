@@ -14,12 +14,12 @@ export const AskHypeLogo: React.FC<AskHypeLogoProps> = ({
   const isConversation = variant === 'conversation';
   const image = (
     <img
-      src="/branding/askhype-logo.jpg"
+      src="/branding/askhype-logo.png"
       alt="AskHype"
       className={clsx(
         'block object-contain',
         isConversation
-          ? 'absolute left-0 top-[-106.25%] h-auto w-full'
+          ? 'absolute left-0 top-[-26.92%] h-auto w-full'
           : ['w-auto', variant === 'compact' ? 'max-h-10' : 'max-h-24']
       )}
     />
@@ -35,8 +35,8 @@ export const AskHypeLogo: React.FC<AskHypeLogoProps> = ({
       )}
     >
       {isConversation ? (
-        // Window y=544..1056 of the square JPG, hiding only space around the artwork.
-        <span className="relative block aspect-[3/1] w-[100px] overflow-hidden md:w-[120px]">
+        // Window y=175..825 of the square PNG keeps all artwork and the tagline.
+        <span className="relative block aspect-[20/13] w-[80px] overflow-hidden md:w-[84px]">
           {image}
         </span>
       ) : image}

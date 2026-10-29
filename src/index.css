@@ -9,6 +9,21 @@
   --color-hype-light: #f8fafc;
   --color-hype-white: #ffffff;
   --color-hype-gray: #f1f5f9;
+  --color-hype-blue: #253c91;
+  --color-chat-bg: #1b2c68;
+  --color-chat-surface: #152354;
+  --color-chat-elevated: #22377f;
+  --color-chat-hover: #2d4696;
+  --color-chat-border: #40558f;
+  --color-chat-outline: #8096cf;
+  --color-chat-text: #f8fafc;
+  --color-chat-muted: #c3cee8;
+  --color-chat-source: #bfdbfe;
+  --color-chat-source-border: #7ab6f5;
+}
+
+.askhype-conversation {
+  color-scheme: dark;
 }
 
 * {

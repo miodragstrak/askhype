@@ -26,7 +26,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   };
 
   return (
-    <div className="rounded-2xl border border-slate-300 bg-white p-2 shadow-[0_8px_30px_rgba(15,23,42,0.08)] focus-within:border-slate-500 focus-within:ring-2 focus-within:ring-yellow-300">
+    <div className="rounded-2xl border border-chat-outline bg-chat-elevated p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
       <div className="flex items-end gap-2">
         <textarea
           ref={textareaRef}
@@ -43,7 +43,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           disabled={disabled}
           aria-label="Poruka za AskHype"
           placeholder="Pitaj AskHype..."
-          className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+          className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button
           type="button"
@@ -51,7 +51,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           disabled={disabled || !value.trim()}
           aria-label="Pošalji poruku"
           title="Pošalji"
-          className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+          className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full bg-hype-yellow text-chat-surface transition enabled:hover:bg-yellow-300 focus:outline-none focus:ring-2 focus:ring-hype-yellow focus:ring-offset-2 focus:ring-offset-chat-elevated disabled:cursor-not-allowed disabled:bg-chat-hover disabled:text-chat-muted"
         >
           <ArrowUp size={19} strokeWidth={2.5} />
         </button>

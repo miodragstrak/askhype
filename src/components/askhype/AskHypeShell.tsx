@@ -165,27 +165,27 @@ export const AskHypeShell = () => {
   const accountLabel = profile?.display_name || user?.email || 'Nalog';
 
   return (
-    <div className="flex h-dvh min-h-[560px] flex-col overflow-hidden bg-white text-slate-950">
-      <header className="flex h-16 flex-none items-center justify-between border-b border-slate-200 bg-white px-3 sm:px-5">
+    <div className="askhype-conversation flex h-dvh min-h-[560px] flex-col overflow-hidden bg-chat-bg text-chat-text">
+      <header className="flex h-16 flex-none items-center justify-between border-b border-chat-border bg-chat-surface px-3 sm:px-5">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
             aria-label="Otvori istoriju razgovora"
             title="Istorija"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-950 md:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-chat-text hover:bg-chat-hover focus:outline-none focus:ring-2 focus:ring-hype-yellow md:hidden"
           >
             <History size={19} />
           </button>
           <AskHypeLogo
             variant="conversation"
-            className="min-h-11 rounded-md px-1 py-1 focus:outline-none focus:ring-2 focus:ring-slate-950"
+            className="min-h-11 rounded-md px-1 py-1 focus:outline-none focus:ring-2 focus:ring-hype-yellow"
           />
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2">
           {usage && (
-            <span className="hidden text-xs text-slate-500 sm:inline">
+            <span className="hidden text-xs text-chat-muted sm:inline">
               {usage.remaining} pitanja
             </span>
           )}
@@ -194,7 +194,7 @@ export const AskHypeShell = () => {
             onClick={startNew}
             aria-label="Novi razgovor"
             title="Novi razgovor"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-950 md:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-chat-muted hover:bg-chat-hover focus:outline-none focus:ring-2 focus:ring-hype-yellow md:hidden"
           >
             <Plus size={19} />
           </button>
@@ -203,7 +203,7 @@ export const AskHypeShell = () => {
             onClick={() => navigate(user ? '/profile' : '/auth')}
             aria-label={user ? `Otvori profil: ${accountLabel}` : 'Prijavi se'}
             title={user ? accountLabel : 'Prijavi se'}
-            className="inline-flex h-10 items-center gap-2 rounded-full px-2 text-sm font-medium text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-950 sm:px-3"
+            className="inline-flex h-10 items-center gap-2 rounded-full px-2 text-sm font-medium text-chat-text hover:bg-chat-hover focus:outline-none focus:ring-2 focus:ring-hype-yellow sm:px-3"
           >
             <UserRound size={18} />
             <span className="hidden max-w-36 truncate sm:block">{user ? accountLabel : 'Prijavi se'}</span>
@@ -222,7 +222,7 @@ export const AskHypeShell = () => {
           onDelete={deleteConversation}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col bg-white">
+        <main className="flex min-w-0 flex-1 flex-col bg-chat-bg">
           <div className="min-h-0 flex-1 overflow-y-auto">
             {activeConversation?.messages.length ? (
               <ConversationThread
@@ -249,10 +249,10 @@ export const AskHypeShell = () => {
             <div ref={bottomRef} />
           </div>
 
-          <div className="flex-none border-t border-slate-100 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
+          <div className="flex-none border-t border-chat-border bg-chat-bg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
             <div className="mx-auto max-w-3xl">
               <PromptComposer onSubmit={(prompt) => void submitPrompt(prompt)} disabled={loading || Boolean(quota)} />
-              <p className="mt-2 text-center text-[11px] text-slate-400">
+              <p className="mt-2 text-center text-[11px] text-chat-muted">
                 Proveri termine, cene i dostupnost pre odluke.
               </p>
             </div>
