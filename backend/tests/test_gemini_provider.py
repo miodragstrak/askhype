@@ -179,9 +179,21 @@ def test_invalid_structured_json_is_rejected() -> None:
         asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
 
 
-def test_wrong_recommendation_count_is_rejected() -> None:
+@pytest.mark.parametrize("recommendation_count", [0, 1, 2, 3])
+def test_generic_payload_accepts_zero_to_three_recommendations(
+    recommendation_count: int,
+) -> None:
     payload = _valid_payload()
-    payload["recommendations"] = payload["recommendations"][:2]
+    payload["recommendations"] = payload["recommendations"][:recommendation_count]
+
+    parsed = GeminiChatPayload.model_validate(payload)
+
+    assert len(parsed.recommendations) == recommendation_count
+
+
+def test_generic_payload_rejects_more_than_three_recommendations() -> None:
+    payload = _valid_payload()
+    payload["recommendations"].append(payload["recommendations"][0].copy())
     models = FakeModels(FakeResponse(text=json.dumps(payload)))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
 
@@ -200,6 +212,8 @@ def test_generation_config_uses_sanitized_json_schema() -> None:
     assert schema is not None
     assert _find_key(schema, "default") == []
     assert schema["title"] == "GeminiChatPayload"
+    assert schema["properties"]["recommendations"]["minItems"] == 0
+    assert schema["properties"]["recommendations"]["maxItems"] == 3
     assert schema["properties"]["recommendations"]["items"]["properties"]["title"]["type"] == "string"
     assert schema["properties"]["sources"]["items"]["properties"]["title"]["type"] == "string"
     validate_schema_required_properties(schema)

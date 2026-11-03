@@ -121,7 +121,7 @@ class GeminiChatPayload(BaseModel):
 
     answer_type: str
     summary: str
-    recommendations: list[GeminiRecommendation] = Field(min_length=3, max_length=3)
+    recommendations: list[GeminiRecommendation] = Field(min_length=0, max_length=3)
     follow_up_actions: list[str] = Field(min_length=2, max_length=4)
     sources: list[GeminiSourceReference] = Field(default_factory=list)
 
