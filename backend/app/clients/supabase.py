@@ -41,7 +41,12 @@ class SupabaseAuthVerifier:
 
     async def verify_claims(self, token: str) -> dict[str, object]:
         result = self.client.auth.get_claims(jwt=token)
-        claims = getattr(result, "claims", None) or result
+        if isinstance(result, dict) and "claims" in result:
+            claims = result["claims"]
+        elif hasattr(result, "claims"):
+            claims = result.claims
+        else:
+            claims = result
         if hasattr(claims, "model_dump"):
             claims = claims.model_dump()
         if not isinstance(claims, dict):
