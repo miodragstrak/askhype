@@ -5,7 +5,7 @@ const EXAMPLES = [
 
 const HYPE_EXAMPLES = [
   'Šta ima novo na Hype TV?',
-  'Koje Hype emisije vredi pogledati?',
+  'Koje emisije i sadržaje Hype TV trenutno predstavlja?',
   'Koji Hype koncerti uskoro dolaze?',
   'Ko su izvođači Hype Production-a?',
 ];
