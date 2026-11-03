@@ -23,7 +23,9 @@ NOW = datetime(2026, 10, 4, 12, tzinfo=UTC)
     ("\u0160ta ima novo na Hype TV?", "news"),
     ("Koje HYPE emisije vredi pogledati?", "shows"),
     ("Hype TV program danas", "shows"),
+    ("Da li ima nekih Hype koncerata uskoro u Beogradu?", "events"),
     ("Koji Hype koncerti uskoro dolaze?", "events"),
+    ("Ima li Hype koncerta večeras?", "events"),
     ("Hype Production events", "events"),
     ("Ko su izvo\u0111a\u010di Hype Production-a?", "artists"),
     ("hypetv.rs novosti", "news"),
@@ -35,6 +37,13 @@ NOW = datetime(2026, 10, 4, 12, tzinfo=UTC)
 ])
 def test_query_detection_is_scoped_to_hype(message: str, topic: str | None) -> None:
     assert hype_topic(message) == topic
+
+
+@pytest.mark.parametrize("concert_form", [
+    "koncert", "koncerti", "koncerta", "koncerata", "koncertu", "koncertima", "koncertom",
+])
+def test_serbian_concert_inflections_are_event_intent(concert_form: str) -> None:
+    assert hype_topic(f"Hype {concert_form}") == "events"
 
 
 @pytest.mark.parametrize("url", [

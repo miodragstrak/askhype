@@ -36,6 +36,9 @@ _LOCATION_CANONICAL = {
     for canonical, forms in _LOCATION_ALIASES.items()
     for form in forms
 }
+_EVENT_INTENT_PATTERN = re.compile(
+    r"\b(?:koncer(?:t\w*|ata)|doga(?:d|dj)aj\w*|event\w*|festival\w*)\b"
+)
 _MONTHS = {form: index for index, forms in enumerate(
     [("januar", "januara"), ("februar", "februara"), ("mart", "marta"),
      ("april", "aprila"), ("maj", "maja"), ("jun", "juna"), ("jul", "jula"),
@@ -60,7 +63,7 @@ def hype_topic(message: str) -> str | None:
     text = normalize(message)
     if not re.search(r"\b(?:hype(?:tv|production)?|hajp|хајп)\b", text):
         return None
-    if any(word in text for word in ["koncert", "dogadaj", "event", "festival"]):
+    if _EVENT_INTENT_PATTERN.search(text):
         return "events"
     if any(word in text for word in ["izvod", "artist", "pevac", "muzicar"]):
         return "artists"
