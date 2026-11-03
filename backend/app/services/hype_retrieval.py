@@ -3,7 +3,7 @@ import json
 import re
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
@@ -21,6 +21,10 @@ MAX_PAGE_BYTES = 1_000_000
 MAX_DOCUMENTS = 3
 MAX_DETAIL_PAGES = 6
 CACHE_SECONDS = 300
+CONCERT_INDEX_FALLBACK_EXCERPT = (
+    "Zvanična Hype Production lista koncerata navodi ovaj događaj; "
+    "detaljna stranica trenutno sadrži neusaglašene podatke."
+)
 _QUERY_STOPWORDS = frozenset("sta ima novo novosti na hype hypetv hypeproduction tv production a koje koji ko su vredi pogledati uskoro dolaze emisija emisije program danas izvodac izvodaci artist artists koncert koncerti koncertima events shows news sadrzaj o i u za da mi molim".split())
 _LOCATION_ALIASES = {
     "beograd": frozenset({
@@ -111,6 +115,13 @@ def _event_date(text: str) -> date | None:
         return None
 
 
+def _catalog_location(title: str, event_date: date | None) -> str | None:
+    title_parts = re.split(r"\s+[-–—]\s+", title)
+    if event_date and len(title_parts) >= 3 and _event_date(title_parts[-1]):
+        return title_parts[-2]
+    return None
+
+
 @dataclass(frozen=True)
 class HypeDocument:
     title: str
@@ -197,9 +208,8 @@ def parse_page(html: str, url: str, retrieved_at: datetime) -> tuple[HypeDocumen
     location = metadata.get("location")
     location = location.get("name") if isinstance(location, dict) else None
     # Production catalog headings often supply a venue/city between artist and date.
-    title_parts = re.split(r"\s+[-–—]\s+", title)
-    if not location and title_date and len(title_parts) >= 3 and _event_date(title_parts[-1]):
-        location = title_parts[-2]
+    if not location:
+        location = _catalog_location(title, title_date)
     links = []
     for anchor in root.select("a[href]"):
         target = urljoin(url, anchor.get("href", ""))
@@ -210,6 +220,45 @@ def parse_page(html: str, url: str, retrieved_at: datetime) -> tuple[HypeDocumen
             links.append((target.split("#", 1)[0], label))
     document = HypeDocument(title, url, excerpt[:1800], retrieved_at, published_at, event_date, conflicting, location)
     return (document if title and len(excerpt) > 30 else None), links
+
+
+def parse_concert_index(html: str, url: str, retrieved_at: datetime) -> list[HypeDocument]:
+    parsed_index = urlsplit(url)
+    if (
+        not is_hype_url(url)
+        or parsed_index.hostname.removeprefix("www.") != "hypeproduction.rs"
+        or parsed_index.path.rstrip("/") != "/koncerti"
+    ):
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.select_one("main, .entry-content, .post-content, .page-content, #content") or soup.body or soup
+    documents: dict[str, HypeDocument] = {}
+    for anchor in root.select("a[href]"):
+        target = urljoin(url, anchor.get("href", "")).split("#", 1)[0]
+        parsed_target = urlsplit(target)
+        if (
+            not is_hype_url(target)
+            or parsed_target.hostname.removeprefix("www.") != "hypeproduction.rs"
+            or not parsed_target.path.startswith("/portfolio/")
+        ):
+            continue
+        title = anchor.get_text(" ", strip=True) or anchor.get("title", "")
+        if not title and (image := anchor.find("img")):
+            title = image.get("alt", "")
+        title = " ".join(title.split())
+        event_date = _event_date(title)
+        if not title or event_date is None:
+            continue
+        documents[target] = HypeDocument(
+            title=title,
+            url=target,
+            excerpt="Zvanična Hype Production lista koncerata navodi ovaj događaj.",
+            retrieved_at=retrieved_at,
+            event_date=event_date,
+            location=_catalog_location(title, event_date),
+        )
+    return list(documents.values())
 
 
 def parse_feed(xml: str, retrieved_at: datetime) -> list[HypeDocument]:
@@ -292,6 +341,7 @@ class HypeRetriever:
             "production": [f"{PRODUCTION_ROOT}/", f"{TV_ROOT}/?s=Hype+Production&feed=rss2"],
         }[topic]
         documents: dict[str, HypeDocument] = {}
+        index_documents: dict[str, HypeDocument] = {}
         detail_urls: set[str] = set()
         candidates: dict[str, str] = {}
         async with httpx.AsyncClient(timeout=4, transport=self.transport,
@@ -306,6 +356,10 @@ class HypeRetriever:
                         documents[doc.url] = doc
                         candidates[doc.url] = doc.title
                 else:
+                    if topic == "events":
+                        for index_doc in parse_concert_index(html, url, retrieved_at):
+                            index_documents[index_doc.url] = index_doc
+                            candidates[index_doc.url] = index_doc.title
                     doc, links = parse_page(html, url, retrieved_at)
                     if doc and topic != "events":
                         documents[doc.url] = doc
@@ -332,8 +386,16 @@ class HypeRetriever:
                     documents.pop(target, None)
                     doc, _ = parse_page(page[0], page[1], page[2])
                     if doc:
-                        documents[doc.url] = doc
-                        detail_urls.add(doc.url)
+                        if doc.conflicting_date and target in index_documents:
+                            fallback = replace(
+                                index_documents[target],
+                                excerpt=CONCERT_INDEX_FALLBACK_EXCERPT,
+                            )
+                            documents[fallback.url] = fallback
+                            detail_urls.add(fallback.url)
+                        else:
+                            documents[doc.url] = doc
+                            detail_urls.add(doc.url)
 
         historical = any(word in normalize(message) for word in ["prosli", "odrzani", "arhiv", "istorij", "past"])
         docs = [doc for doc in documents.values() if not doc.conflicting_date]
