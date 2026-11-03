@@ -22,6 +22,16 @@ MAX_DOCUMENTS = 3
 MAX_DETAIL_PAGES = 6
 CACHE_SECONDS = 300
 _QUERY_STOPWORDS = frozenset("sta ima novo novosti na hype hypetv hypeproduction tv production a koje koji ko su vredi pogledati uskoro dolaze emisija emisije program danas izvodac izvodaci artist artists koncert koncerti koncertima events shows news sadrzaj o i u za da mi molim".split())
+_LOCATION_ALIASES = {
+    "beograd": frozenset({
+        "beograd", "beogradu", "beograda", "beogradska", "beogradski", "beogradskoj",
+    }),
+}
+_LOCATION_CANONICAL = {
+    form: canonical
+    for canonical, forms in _LOCATION_ALIASES.items()
+    for form in forms
+}
 _MONTHS = {form: index for index, forms in enumerate(
     [("januar", "januara"), ("februar", "februara"), ("mart", "marta"),
      ("april", "aprila"), ("maj", "maja"), ("jun", "juna"), ("jul", "jula"),
@@ -32,6 +42,14 @@ _MONTHS = {form: index for index, forms in enumerate(
 
 def normalize(text: str) -> str:
     return "".join(char for char in unicodedata.normalize("NFKD", text.casefold().replace("đ", "d")) if not unicodedata.combining(char))
+
+
+def _location_keys(text: str) -> set[str]:
+    return {
+        canonical
+        for word in re.findall(r"\w+", normalize(text))
+        if (canonical := _LOCATION_CANONICAL.get(word)) is not None
+    }
 
 
 def hype_topic(message: str) -> str | None:
@@ -264,6 +282,7 @@ class HypeRetriever:
 
     async def _retrieve(self, message: str, topic: str, today: date) -> list[HypeDocument]:
         tokens = [word[:80] for word in re.findall(r"\w+", normalize(message)) if len(word) > 2 and word not in _QUERY_STOPWORDS][:8]
+        query_locations = _location_keys(message)
         search = urlencode({"s": " ".join(tokens), "feed": "rss2"})
         seeds = {
             "news": [f"{TV_ROOT}/?{search}" if tokens else f"{TV_ROOT}/feed/", f"{PRODUCTION_ROOT}/feed/"],
@@ -300,8 +319,10 @@ class HypeRetriever:
                 event_date = _event_date(title) or _event_date(urlsplit(url).path)
                 production = "hypeproduction.rs" in urlsplit(url).hostname
                 matches = sum(word in normalize(title) for word in tokens)
+                location_match = bool(query_locations & _location_keys(title + " " + urlsplit(url).path))
                 return (0 if (production == (topic in ("events", "artists"))) else 1,
-                        0 if event_date and event_date >= today else 1, -matches,
+                        0 if event_date and event_date >= today else 1,
+                        0 if not query_locations or location_match else 1, -matches,
                         event_date or date.max) if topic == "events" else (0 if (production == (topic in ("artists", "production"))) else 1, -matches)
 
             selected = sorted(candidates.items(), key=candidate_rank)[:MAX_DETAIL_PAGES]
@@ -322,7 +343,10 @@ class HypeRetriever:
         def rank(doc: HypeDocument) -> tuple:
             primary = doc.owner == ("Hype Production" if topic in ("artists", "events", "production") else "Hype TV")
             if topic == "events":
-                return (not primary, not (doc.event_date and doc.event_date >= today), doc.event_date or date.max)
+                location_text = " ".join(filter(None, [doc.title, doc.location, doc.excerpt, urlsplit(doc.url).path]))
+                location_match = bool(query_locations & _location_keys(location_text))
+                return (not primary, not (doc.event_date and doc.event_date >= today),
+                        bool(query_locations) and not location_match, doc.event_date or date.max)
             matches = sum(word in normalize(doc.title + " " + doc.excerpt) for word in tokens)
             return (not primary, -matches, -(doc.published_at.timestamp() if doc.published_at else 0))
 

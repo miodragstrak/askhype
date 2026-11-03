@@ -11,7 +11,8 @@ from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatService
 from app.services.hype_retrieval import (
     MAX_PAGE_BYTES, PRODUCTION_ROOT, TV_ROOT, HypeContext, HypeDocument,
-    HypeRetriever, hype_retriever, hype_topic, is_hype_url, parse_feed, parse_page,
+    HypeRetriever, _location_keys, hype_retriever, hype_topic, is_hype_url,
+    parse_feed, parse_page,
 )
 
 NOW = datetime(2026, 10, 4, 12, tzinfo=UTC)
@@ -109,6 +110,21 @@ def test_production_catalog_location_is_copied_from_title() -> None:
     assert doc.event_date == date(2099, 12, 19)
 
 
+@pytest.mark.parametrize(("query_location", "event_location"), [
+    ("Beograd", "Beogradska Arena"),
+    ("Beogradu", "Beogradska Arena"),
+    ("Beograda", "Beograd"),
+    ("Beogradska", "Beograd"),
+    ("Beogradski", "Beograd"),
+    ("Beogradskoj", "Beograd"),
+])
+def test_serbian_beograd_forms_share_a_location_key(
+    query_location: str,
+    event_location: str,
+) -> None:
+    assert _location_keys(query_location) & _location_keys(event_location) == {"beograd"}
+
+
 def test_cancelled_event_is_not_a_document() -> None:
     metadata = {"@type": "Event", "startDate": "2099-11-04", "eventStatus": "https://schema.org/EventCancelled"}
     doc, _ = parse_page(f'<script type="application/ld+json">{json.dumps(metadata)}</script>'
@@ -157,6 +173,72 @@ def test_upcoming_retrieval_prefers_production_and_excludes_past_and_conflicts()
     first_calls = list(calls)
     asyncio.run(retriever.retrieve("Koji Hype koncerti uskoro dolaze?"))
     assert calls == first_calls
+
+
+def _location_event_transport(calls: list[str], *, crowded: bool = False) -> httpx.MockTransport:
+    matching_path = "/portfolio/miroslav-ilic-beogradska-arena-10-12-2026/"
+    unrelated = [
+        (f"/portfolio/izvodjac-{index}-nis-{index:02d}-12-2026/", f"IZVODJAC {index} - NIS - {index:02d}.12.2026")
+        for index in range(1, 7 if crowded else 2)
+    ]
+    events = [
+        *unrelated,
+        (matching_path, "MIROSLAV ILIĆ – BEOGRADSKA ARENA – 10.12.2026."),
+        ("/portfolio/stari-beograd-01-01-2020/", "STARI KONCERT - BEOGRAD - 01.01.2020"),
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if str(request.url) == f"{PRODUCTION_ROOT}/koncerti/":
+            links = "".join(f'<a href="{path}">{title}</a>' for path, title in events)
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=f"<main><h1>Koncerti</h1>{links}</main>",
+            )
+        if request.url.host == "hypetv.rs":
+            return httpx.Response(200, headers={"content-type": "application/rss+xml"}, text="<rss><channel/></rss>")
+        title = dict(events).get(request.url.path)
+        if title:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=f"<main><h1>{title}</h1><p>Potvrđen koncert iz zvaničnog Hype Production izvora.</p></main>",
+            )
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handle)
+
+
+def test_matching_beograd_event_ranks_above_unrelated_city_and_past_event() -> None:
+    calls: list[str] = []
+    context = asyncio.run(
+        HypeRetriever(_location_event_transport(calls))._retrieve(
+            "Hype koncerti iz Beograda",
+            "events",
+            date(2026, 11, 3),
+        )
+    )
+
+    assert context[0].title == "MIROSLAV ILIĆ – BEOGRADSKA ARENA – 10.12.2026."
+    assert context[0].location == "BEOGRADSKA ARENA"
+    assert all(doc.event_date and doc.event_date >= date(2026, 11, 3) for doc in context)
+    assert all("stari-beograd" not in doc.url for doc in context)
+
+
+def test_miroslav_beogradska_arena_survives_crowded_candidate_selection() -> None:
+    calls: list[str] = []
+    context = asyncio.run(
+        HypeRetriever(_location_event_transport(calls, crowded=True))._retrieve(
+            "Da li ima nekih Hype koncerata uskoro u Beogradu?",
+            "events",
+            date(2026, 11, 3),
+        )
+    )
+    expected_url = f"{PRODUCTION_ROOT}/portfolio/miroslav-ilic-beogradska-arena-10-12-2026/"
+
+    assert expected_url in calls
+    assert any(doc.url == expected_url for doc in context)
 
 
 def test_generic_question_does_not_access_network() -> None:
