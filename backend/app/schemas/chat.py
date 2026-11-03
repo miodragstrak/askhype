@@ -1,6 +1,12 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+class ChatHistoryItem(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(..., min_length=1)
 
 
 class ChatRequest(BaseModel):
@@ -9,6 +15,7 @@ class ChatRequest(BaseModel):
     location: str = "Beograd"
     language: str = "sr"
     interests: list[str] = Field(default_factory=list)
+    history: list[ChatHistoryItem] = Field(default_factory=list, max_length=6)
 
 
 class Recommendation(BaseModel):

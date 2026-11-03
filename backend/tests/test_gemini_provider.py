@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.providers.exceptions import (
@@ -87,15 +88,87 @@ def test_successful_structured_response_becomes_chat_response() -> None:
     call = models.calls[0]
     assert call["model"] == "gemini-test-model"
     assert "Predloži vikend izlazak u Beogradu" in call["contents"]
-    assert "Selected application location: Beograd" in call["contents"]
-    assert "Any explicit place named in the current user message overrides" in call["contents"]
+    assert "Selected application location (fallback only): Beograd" in call["contents"]
+    assert "Any explicit place named in the current user message has highest priority" in call["contents"]
     assert "language: sr" in call["contents"]
     assert "interests: muzika, hrana" in call["contents"]
     assert "conversation_id: conv_existing" in call["contents"]
-    assert "conversation_history: not available" in call["contents"]
+    assert "Recent conversation:\n(none supplied)" in call["contents"]
+    assert "Current message:\nPredloži vikend izlazak u Beogradu" in call["contents"]
     assert call["config"].response_mime_type == "application/json"
     assert call["config"].response_schema is None
     assert call["config"].response_json_schema is not None
+
+
+def test_recent_tara_history_is_sent_for_mitrovac_follow_up() -> None:
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(text="{}"))))
+    request = ChatRequest(
+        message="Mitrovac",
+        history=[
+            {"role": "user", "text": "Isplaniraj mi vikend na Tari."},
+            {"role": "assistant", "text": "Predlog vikenda na Tari."},
+        ],
+    )
+
+    context = provider._build_user_context(request)
+
+    assert "Recent conversation:\nuser: Isplaniraj mi vikend na Tari." in context
+    assert "assistant: Predlog vikenda na Tari." in context
+    assert "Current message:\nMitrovac" in context
+
+
+def test_recent_mitrovac_context_precedes_selected_default_for_follow_up() -> None:
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(text="{}"))))
+    request = ChatRequest(
+        message="duži boravak",
+        location="Beograd",
+        history=[
+            {"role": "user", "text": "Mitrovac na Tari"},
+            {"role": "assistant", "text": "Predlog za Mitrovac na Tari."},
+        ],
+    )
+
+    context = provider._build_user_context(request)
+
+    assert "user: Mitrovac na Tari" in context
+    assert "Current message:\nduži boravak" in context
+    assert "Selected application location (fallback only): Beograd" in context
+    assert "use an obvious location established by the recent conversation before" in context
+    assert "must not override an obvious location established by the recent conversation" in context
+
+
+def test_current_explicit_location_overrides_tara_history() -> None:
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(text="{}"))))
+    request = ChatRequest(
+        message="Šta da radim u Beogradu?",
+        history=[{"role": "user", "text": "Isplaniraj mi vikend na Tari."}],
+    )
+
+    context = provider._build_user_context(request)
+
+    assert "user: Isplaniraj mi vikend na Tari." in context
+    assert "Current message:\nŠta da radim u Beogradu?" in context
+    assert "current user message has highest priority" in context
+
+
+def test_chat_history_is_bounded_to_six_items() -> None:
+    history = [{"role": "user", "text": f"Poruka {index}"} for index in range(6)]
+
+    assert len(ChatRequest(message="Nastavi", history=history).history) == 6
+
+    with pytest.raises(ValidationError):
+        ChatRequest(
+            message="Nastavi",
+            history=[*history, {"role": "assistant", "text": "Sedma poruka"}],
+        )
+
+
+def test_empty_history_is_backward_compatible() -> None:
+    request = ChatRequest(message="Plan za vikend")
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(text="{}"))))
+
+    assert request.history == []
+    assert "Recent conversation:\n(none supplied)" in provider._build_user_context(request)
 
 
 def test_uuid_conversation_id_is_generated_when_absent() -> None:

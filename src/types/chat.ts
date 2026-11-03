@@ -1,9 +1,15 @@
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
 export interface ChatRequest {
   message: string;
   conversation_id?: string | null;
   location?: string;
   language?: string;
   interests?: string[];
+  history?: ChatHistoryItem[];
 }
 
 export interface ChatResponse {

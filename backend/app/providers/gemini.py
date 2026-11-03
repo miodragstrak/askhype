@@ -318,16 +318,24 @@ class GeminiProvider:
     def _build_user_context(self, request: ChatRequest) -> str:
         interests = ", ".join(request.interests) if request.interests else "none supplied"
         conversation = request.conversation_id or "none supplied"
+        history = (
+            "\n".join(f"{item.role}: {item.text}" for item in request.history)
+            if request.history
+            else "(none supplied)"
+        )
         return "\n".join(
             [
                 "AskHype chat request context:",
-                f"message: {request.message}",
+                "Recent conversation:",
+                history,
+                "",
+                "Current message:",
+                request.message,
                 "Location context:",
                 build_location_context(request),
                 f"language: {request.language}",
                 f"interests: {interests}",
                 f"conversation_id: {conversation}",
-                "conversation_history: not available; the backend only passes the current request.",
             ]
         )
 

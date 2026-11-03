@@ -78,6 +78,15 @@ export const AskHypeShell = () => {
       messages: [],
     };
     const appendUser = options.appendUser ?? true;
+    const lastMessage = conversation.messages.at(-1);
+    const priorMessages =
+      !appendUser && lastMessage?.role === 'user' && lastMessage.text === prompt
+        ? conversation.messages.slice(0, -1)
+        : conversation.messages;
+    const history = priorMessages.slice(-6).map((message) => ({
+      role: message.role,
+      text: message.role === 'user' ? message.text : message.response.summary,
+    }));
     const userMessage: LocalMessage = {
       id: createId(),
       role: 'user',
@@ -105,6 +114,7 @@ export const AskHypeShell = () => {
           location: preferences.city || 'Beograd',
           language: preferences.language || 'sr',
           interests: preferences.interests ?? [],
+          history,
         },
         { accessToken: session?.access_token },
       );

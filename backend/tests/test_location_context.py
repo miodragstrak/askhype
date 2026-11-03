@@ -34,7 +34,8 @@ def test_selected_location_does_not_override_message_location_in_context() -> No
 
     context = build_location_context(request)
 
-    assert "Selected application location: Beograd" in context
+    assert "Selected application location (fallback only): Beograd" in context
     assert "Explicit message location: not deterministically extracted by the backend" in context
-    assert "Any explicit place named in the current user message overrides" in context
+    assert "Any explicit place named in the current user message has highest priority" in context
+    assert "recent conversation before the selected application location" in context
     assert "Do not silently combine conflicting locations" in context
