@@ -113,6 +113,19 @@ def test_conflicting_event_dates_are_flagged() -> None:
     assert doc.conflicting_date
 
 
+def test_event_like_body_listing_with_different_date_is_conflicting() -> None:
+    doc, _ = parse_page(
+        '<main><h1>VESNA ZMIJANAC - SKOPJE - 28.11.2026.</h1>'
+        '<p>VESNA ZMIJANAC – SARAJEVO – 19.12.2026</p></main>',
+        f"{PRODUCTION_ROOT}/portfolio/vesna-zmijanac/",
+        NOW,
+    )
+
+    assert doc.title == "VESNA ZMIJANAC - SKOPJE - 28.11.2026."
+    assert doc.event_date == date(2026, 11, 28)
+    assert doc.conflicting_date
+
+
 def test_production_catalog_location_is_copied_from_title() -> None:
     doc, _ = parse_page('<main><h1>IZVODJAC - SARAJEVO - 19.12.2099</h1><p>Potvrdjen koncert na zvanicnoj stranici.</p></main>',
                         f"{PRODUCTION_ROOT}/portfolio/concert/", NOW)
@@ -274,6 +287,81 @@ def test_miroslav_beogradska_arena_survives_crowded_candidate_selection() -> Non
 
     assert expected_url in calls
     assert any(doc.url == expected_url for doc in context)
+
+
+@pytest.mark.parametrize("detail_mode", ["unavailable", "too_short"])
+def test_official_index_event_survives_without_usable_detail(detail_mode: str) -> None:
+    miroslav_url = f"{PRODUCTION_ROOT}/portfolio/miroslav-ilic-beogradska-arena-10-12-2026/"
+    skopje_url = f"{PRODUCTION_ROOT}/portfolio/vesna-zmijanac-skopje-28-11-2026/"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == f"{PRODUCTION_ROOT}/koncerti/":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    '<main><h1>Koncerti</h1>'
+                    f'<a href="{miroslav_url}">MIROSLAV ILIĆ – BEOGRADSKA ARENA – 10.12.2026.</a>'
+                    f'<a href="{skopje_url}">VESNA ZMIJANAC - SKOPJE - 28.11.2026.</a>'
+                    '<a href="/portfolio/past/">STARI DOGAĐAJ - BEOGRAD - 01.01.2020.</a></main>'
+                ),
+            )
+        if request.url.host == "hypetv.rs":
+            return httpx.Response(200, headers={"content-type": "application/rss+xml"}, text="<rss><channel/></rss>")
+        if detail_mode == "too_short":
+            return httpx.Response(200, headers={"content-type": "text/html"}, text="<main><h1>x</h1></main>")
+        return httpx.Response(404)
+
+    documents = asyncio.run(
+        HypeRetriever(httpx.MockTransport(handle))._retrieve(
+            "Da li ima nekih Hype koncerata uskoro u Beogradu?",
+            "events",
+            date(2026, 11, 3),
+        )
+    )
+
+    assert [doc.url for doc in documents] == [miroslav_url, skopje_url]
+    assert documents[0].title == "MIROSLAV ILIĆ – BEOGRADSKA ARENA – 10.12.2026."
+    assert documents[0].event_date == date(2026, 12, 10)
+    assert documents[0].location == "BEOGRADSKA ARENA"
+    assert documents[0].excerpt == "Zvanična Hype Production lista koncerata navodi ovaj događaj."
+    assert all("past" not in doc.url for doc in documents)
+
+
+def test_cancelled_detail_removes_official_index_evidence() -> None:
+    event_url = f"{PRODUCTION_ROOT}/portfolio/cancelled-index-event/"
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == f"{PRODUCTION_ROOT}/koncerti/":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=f'<main><a href="{event_url}">OTKAZANI DOGAĐAJ - BEOGRAD - 10.12.2099.</a></main>',
+            )
+        if request.url.host == "hypetv.rs":
+            return httpx.Response(200, headers={"content-type": "application/rss+xml"}, text="<rss><channel/></rss>")
+        if str(request.url) == event_url:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    '<script type="application/ld+json">'
+                    '{"@type":"MusicEvent","startDate":"2099-12-10",'
+                    '"eventStatus":"https://schema.org/EventCancelled"}'
+                    '</script><main><h1>Otkazani događaj</h1></main>'
+                ),
+            )
+        return httpx.Response(404)
+
+    documents = asyncio.run(
+        HypeRetriever(httpx.MockTransport(handle))._retrieve(
+            "Hype koncert u Beogradu",
+            "events",
+            date(2026, 11, 3),
+        )
+    )
+
+    assert documents == []
 
 
 def test_conflicting_miroslav_detail_uses_only_official_index_fallback() -> None:

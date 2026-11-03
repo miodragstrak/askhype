@@ -125,6 +125,30 @@ def _catalog_location(title: str, event_date: date | None) -> str | None:
     return None
 
 
+def _event_like_body_dates(root: BeautifulSoup) -> set[date]:
+    dates: set[date] = set()
+    for element in root.select("p, h2, h3, h4, h5, h6, li"):
+        text = " ".join(element.get_text(" ", strip=True).split())
+        event_date = _event_date(text[:400])
+        if event_date and ("datum:" in normalize(text) or _catalog_location(text, event_date)):
+            dates.add(event_date)
+    return dates
+
+
+def _has_cancelled_event_metadata(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.select('script[type="application/ld+json"]'):
+        try:
+            if any(
+                str(obj.get("eventStatus", "")).endswith("EventCancelled")
+                for obj in _json_objects(json.loads(tag.get_text()))
+            ):
+                return True
+        except (ValueError, TypeError, RecursionError):
+            continue
+    return False
+
+
 @dataclass(frozen=True)
 class HypeDocument:
     title: str
@@ -205,9 +229,10 @@ def parse_page(html: str, url: str, retrieved_at: datetime) -> tuple[HypeDocumen
     excerpt = " ".join(root.get_text(" ", strip=True).split())
     start = _datetime(str(metadata.get("startDate", "")))
     title_date = _event_date(title)
-    body_date = _event_date(excerpt[excerpt.find("Datum:"):][:100]) if "Datum:" in excerpt else None
-    event_date = start.date() if start else title_date or body_date
-    conflicting = len({value for value in [start.date() if start else None, title_date, body_date] if value}) > 1
+    body_dates = _event_like_body_dates(root)
+    event_date = start.date() if start else title_date or next(iter(body_dates), None)
+    explicit_dates = {value for value in [start.date() if start else None, title_date] if value}
+    conflicting = len(explicit_dates | body_dates) > 1
     location = metadata.get("location")
     location = location.get("name") if isinstance(location, dict) else None
     # Production catalog headings often supply a venue/city between artist and date.
@@ -345,7 +370,7 @@ class HypeRetriever:
         }[topic]
         documents: dict[str, HypeDocument] = {}
         index_documents: dict[str, HypeDocument] = {}
-        detail_urls: set[str] = set()
+        event_evidence_urls: set[str] = set()
         candidates: dict[str, str] = {}
         async with httpx.AsyncClient(timeout=4, transport=self.transport,
                                      headers={"User-Agent": "AskHype-Demo/0.1 (Hype content retrieval)"}) as client:
@@ -362,6 +387,8 @@ class HypeRetriever:
                     if topic == "events":
                         for index_doc in parse_concert_index(html, url, retrieved_at):
                             index_documents[index_doc.url] = index_doc
+                            documents[index_doc.url] = index_doc
+                            event_evidence_urls.add(index_doc.url)
                             candidates[index_doc.url] = index_doc.title
                     doc, links = parse_page(html, url, retrieved_at)
                     if doc and topic != "events":
@@ -386,7 +413,8 @@ class HypeRetriever:
             pages = await asyncio.gather(*(self._fetch(client, url) for url, _ in selected))
             for (target, _), page in zip(selected, pages):
                 if page:
-                    documents.pop(target, None)
+                    if target not in index_documents:
+                        documents.pop(target, None)
                     doc, _ = parse_page(page[0], page[1], page[2])
                     if doc:
                         if doc.conflicting_date and target in index_documents:
@@ -395,15 +423,19 @@ class HypeRetriever:
                                 excerpt=CONCERT_INDEX_FALLBACK_EXCERPT,
                             )
                             documents[fallback.url] = fallback
-                            detail_urls.add(fallback.url)
+                            event_evidence_urls.add(fallback.url)
                         else:
+                            documents.pop(target, None)
                             documents[doc.url] = doc
-                            detail_urls.add(doc.url)
+                            event_evidence_urls.add(doc.url)
+                    elif target in index_documents and _has_cancelled_event_metadata(page[0]):
+                        documents.pop(target, None)
+                        event_evidence_urls.discard(target)
 
         historical = any(word in normalize(message) for word in ["prosli", "odrzani", "arhiv", "istorij", "past"])
         docs = [doc for doc in documents.values() if not doc.conflicting_date]
         if topic == "events" and not historical:
-            docs = [doc for doc in docs if doc.url in detail_urls and doc.event_date and doc.event_date >= today]
+            docs = [doc for doc in docs if doc.url in event_evidence_urls and doc.event_date and doc.event_date >= today]
 
         def rank(doc: HypeDocument) -> tuple:
             primary = doc.owner == ("Hype Production" if topic in ("artists", "events", "production") else "Hype TV")
