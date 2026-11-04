@@ -254,7 +254,7 @@ export const AskHypeShell = () => {
                 onPremium={() => navigate('/premium')}
               />
             ) : (
-              <EmptyConversation onSelect={(prompt) => void submitPrompt(prompt)} />
+              <EmptyConversation />
             )}
             <div ref={bottomRef} />
           </div>
