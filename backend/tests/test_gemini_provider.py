@@ -23,6 +23,7 @@ from app.providers.gemini import (
     validate_schema_required_properties,
 )
 from app.schemas.chat import ChatRequest
+from app.schemas.attachments import ImageAttachment
 from app.services.hype_retrieval import HypeContext, HypeDocument
 from app.services.chat_service import ChatService
 from app.services.public_sources import PublicSourceContext, PublicSourceReader, SourceFailure
@@ -185,6 +186,24 @@ def test_uuid_conversation_id_is_generated_when_absent() -> None:
 
     assert response.conversation_id.startswith("conv_")
     assert len(response.conversation_id) > len("conv_")
+
+
+def test_images_are_sent_as_ordered_multimodal_parts() -> None:
+    models = FakeModels(FakeResponse(text=json.dumps(_valid_payload())))
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+    images = [
+        ImageAttachment("image/png", b"png-bytes", "one.png"),
+        ImageAttachment("image/jpeg", b"jpeg-bytes", "two.jpg"),
+    ]
+
+    asyncio.run(provider.generate_chat_response(ChatRequest(message="Uporedi slike"), images=images))
+
+    parts = models.calls[0]["contents"]
+    assert "Uporedi slike" in parts[0].text
+    assert parts[1].inline_data.mime_type == "image/png"
+    assert parts[1].inline_data.data == b"png-bytes"
+    assert parts[2].inline_data.mime_type == "image/jpeg"
+    assert "For attached images" in models.calls[0]["config"].system_instruction
 
 
 def test_hype_context_is_grounded_and_only_retrieved_urls_survive() -> None:

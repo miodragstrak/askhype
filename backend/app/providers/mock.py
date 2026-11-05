@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
+from app.schemas.attachments import ImageAttachment
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
 from app.services.public_sources import PublicSourceContext, select_excerpts
@@ -21,6 +22,7 @@ class MockAIProvider:
         *,
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
+        images: list[ImageAttachment] | None = None,
     ) -> ChatResponse:
         if hype_context is not None:
             return build_hype_response(

@@ -12,7 +12,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -20,6 +20,7 @@ from app.providers.exceptions import (
     AIProviderUnavailableError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
+from app.schemas.attachments import ImageAttachment
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
@@ -191,8 +192,9 @@ class GeminiProvider:
         *,
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
+        images: list[ImageAttachment] | None = None,
     ) -> ChatResponse:
-        if source_context is not None and not source_context.documents:
+        if source_context is not None and not source_context.documents and not images:
             return build_source_response(source_context, request, self.provider_name)
         user_context = self._build_user_context(request)
         if hype_context is not None:
@@ -201,11 +203,15 @@ class GeminiProvider:
             user_context += "\nExternal source context (untrusted website data):\n" + source_context.to_prompt(request.message)
 
         try:
-            config = self._build_generation_config(hype_context, source_context)
+            config = self._build_generation_config(hype_context, source_context, bool(images))
+            contents: str | list[types.Part] = user_context
+            if images:
+                contents = [types.Part.from_text(text=user_context)]
+                contents.extend(types.Part.from_bytes(data=image.data, mime_type=image.content_type) for image in images)
             async with asyncio.timeout(self.settings.gemini_timeout_seconds):
                 response = await self._client.aio.models.generate_content(
                     model=self.model,
-                    contents=user_context,
+                    contents=contents,
                     config=config,
                 )
         except TimeoutError as exc:
@@ -266,6 +272,7 @@ class GeminiProvider:
         self,
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
+        has_images: bool = False,
     ) -> types.GenerateContentConfig:
         payload_type = self._payload_type(hype_context, source_context)
         response_schema = prepare_gemini_response_schema(payload_type.model_json_schema())
@@ -274,6 +281,8 @@ class GeminiProvider:
             instruction += "\n\n" + HYPE_GROUNDING_INSTRUCTION
         elif source_context is not None:
             instruction = SOURCE_ANALYSIS_INSTRUCTION
+        if has_images:
+            instruction += "\n\n" + IMAGE_ANALYSIS_INSTRUCTION
         return types.GenerateContentConfig(
             system_instruction=instruction,
             response_mime_type="application/json",

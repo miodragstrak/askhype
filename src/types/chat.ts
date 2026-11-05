@@ -3,6 +3,11 @@ export interface ChatHistoryItem {
   text: string;
 }
 
+export interface PendingImage {
+  file: File;
+  previewUrl: string;
+}
+
 export interface ChatRequest {
   message: string;
   conversation_id?: string | null;

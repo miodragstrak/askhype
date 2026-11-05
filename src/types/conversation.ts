@@ -5,6 +5,8 @@ export type LocalMessage =
       id: string;
       role: 'user';
       text: string;
+      // Object URLs are page-lifetime previews only; image bytes are never persisted or resent.
+      imagePreviews?: string[];
       createdAt: string;
     }
   | {

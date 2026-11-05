@@ -1,4 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile
 
 from app.api.dependencies import get_request_identity, get_usage_service
 from app.auth.identity import RequestIdentity
@@ -9,6 +14,7 @@ from app.providers.exceptions import (
     AIProviderUnavailableError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.attachments import MAX_IMAGE_BYTES, MAX_IMAGES, ImageAttachment, ImageAttachmentError, validate_image
 from app.services.chat_service import ChatService, UnsupportedAIProviderError
 from app.services.usage_service import (
     PromptLimitReached,
@@ -23,11 +29,12 @@ router = APIRouter(tags=["chat"])
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
-    request: ChatRequest,
+    http_request: Request,
     response: Response,
     identity: RequestIdentity = Depends(get_request_identity),
     usage_service: UsageService = Depends(get_usage_service),
 ) -> ChatResponse:
+    request, images = await _parse_chat_request(http_request)
     try:
         reservation = await usage_service.reserve(identity)
     except PromptLimitReached as exc:
@@ -42,7 +49,11 @@ async def chat(
         ) from exc
 
     try:
-        chat_response = await ChatService().generate_response(request)
+        service = ChatService()
+        chat_response = (
+            await service.generate_response(request, images)
+            if images else await service.generate_response(request)
+        )
         await usage_service.finalize(
             reservation.usage_event_id,
             status="completed",
@@ -97,3 +108,34 @@ async def _finalize_failed(
         conversation_id=None,
         failure_code=failure_code,
     )
+
+
+async def _parse_chat_request(http_request: Request) -> tuple[ChatRequest, list[ImageAttachment]]:
+    content_type = http_request.headers.get("content-type", "").casefold()
+    try:
+        if content_type.startswith("application/json"):
+            return ChatRequest.model_validate(await http_request.json()), []
+        if not content_type.startswith("multipart/form-data"):
+            raise HTTPException(status_code=415, detail="Podržani su JSON i multipart/form-data zahtevi.")
+        form = await http_request.form(max_files=MAX_IMAGES + 1, max_fields=10, max_part_size=MAX_IMAGE_BYTES + 1)
+        uploads = [item for item in form.getlist("images") if isinstance(item, UploadFile)]
+        if len(uploads) > MAX_IMAGES:
+            raise HTTPException(status_code=400, detail="Možeš poslati najviše 3 slike u jednoj poruci.")
+        raw_request = form.get("request")
+        if not isinstance(raw_request, str):
+            raise HTTPException(status_code=400, detail="Nedostaje polje request.")
+        payload = json.loads(raw_request)
+        if uploads and not str(payload.get("message", "")).strip():
+            payload["message"] = "Analiziraj priloženu sliku/slike i opiši relevantne informacije."
+        parsed_request = ChatRequest.model_validate(payload)
+        images = [
+            validate_image(await upload.read(MAX_IMAGE_BYTES + 1), upload.content_type, upload.filename)
+            for upload in uploads
+        ]
+        return parsed_request, images
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="Neispravno request JSON polje.") from exc
+    except ImageAttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

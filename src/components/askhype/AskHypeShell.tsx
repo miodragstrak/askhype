@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
 import { PromptLimitError, sendChatMessage, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
+import type { PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
 import { storageUtils } from '../../utils';
 import { AskHypeLogo } from '../branding/AskHypeLogo';
@@ -35,7 +36,7 @@ export const AskHypeShell = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaLimitPayload | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string } | null>(null);
+  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[] } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preferences = useMemo(() => storageUtils.getUserPreferences(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null;
@@ -60,10 +61,12 @@ export const AskHypeShell = () => {
 
   const submitPrompt = async (
     rawPrompt: string,
+    images: PendingImage[] = [],
     options: { appendUser?: boolean; conversationId?: string } = {},
-  ) => {
-    const prompt = rawPrompt.trim();
-    if (!prompt || loading) return;
+  ): Promise<boolean> => {
+    const visiblePrompt = rawPrompt.trim();
+    const prompt = visiblePrompt || (images.length ? 'Analiziraj priloženu sliku/slike i opiši relevantne informacije.' : '');
+    if (!prompt || loading) return false;
 
     const now = new Date().toISOString();
     const existing = conversations.find(
@@ -71,7 +74,7 @@ export const AskHypeShell = () => {
     );
     const conversation: LocalConversation = existing ?? {
       id: createId(),
-      title: conversationTitle(prompt),
+      title: conversationTitle(visiblePrompt || 'Analiza slike'),
       createdAt: now,
       updatedAt: now,
       serverConversationId: null,
@@ -80,7 +83,7 @@ export const AskHypeShell = () => {
     const appendUser = options.appendUser ?? true;
     const lastMessage = conversation.messages.at(-1);
     const priorMessages =
-      !appendUser && lastMessage?.role === 'user' && lastMessage.text === prompt
+      !appendUser && lastMessage?.role === 'user'
         ? conversation.messages.slice(0, -1)
         : conversation.messages;
     const history = priorMessages.slice(-6).map((message) => ({
@@ -90,7 +93,8 @@ export const AskHypeShell = () => {
     const userMessage: LocalMessage = {
       id: createId(),
       role: 'user',
-      text: prompt,
+      text: visiblePrompt || 'Priložena slika',
+      imagePreviews: images.map((image) => image.previewUrl),
       createdAt: now,
     };
     const pendingConversation = {
@@ -101,7 +105,7 @@ export const AskHypeShell = () => {
 
     setActiveId(conversation.id);
     upsertConversation(pendingConversation);
-    setLastSubmission({ conversationId: conversation.id, text: prompt });
+    setLastSubmission({ conversationId: conversation.id, text: prompt, images });
     setLoading(true);
     setError(null);
     setQuota(null);
@@ -117,6 +121,7 @@ export const AskHypeShell = () => {
           history,
         },
         { accessToken: session?.access_token },
+        images,
       );
       const assistantMessage: LocalMessage = {
         id: createId(),
@@ -137,13 +142,15 @@ export const AskHypeShell = () => {
       });
       applyUsageSnapshot(result.usage);
       void refreshUsage();
+      return true;
     } catch (requestError) {
       if (requestError instanceof PromptLimitError) {
         setQuota(requestError.payload);
         applyUsageSnapshot(requestError.payload);
       } else {
-        setError('AskHype trenutno ne može da odgovori. Pokušaj ponovo.');
+        setError(requestError instanceof Error ? requestError.message : 'AskHype trenutno ne može da odgovori. Pokušaj ponovo.');
       }
+      return false;
     } finally {
       setLoading(false);
     }
@@ -242,7 +249,7 @@ export const AskHypeShell = () => {
                 quota={quota}
                 onRetry={() => {
                   if (lastSubmission) {
-                    void submitPrompt(lastSubmission.text, {
+                    void submitPrompt(lastSubmission.text, lastSubmission.images, {
                       appendUser: false,
                       conversationId: lastSubmission.conversationId,
                     });
@@ -261,7 +268,7 @@ export const AskHypeShell = () => {
 
           <div className="flex-none border-t border-chat-border bg-chat-bg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
             <div className="mx-auto max-w-3xl">
-              <PromptComposer onSubmit={(prompt) => void submitPrompt(prompt)} disabled={loading || Boolean(quota)} />
+              <PromptComposer onSubmit={(prompt, images) => submitPrompt(prompt, images)} disabled={loading || Boolean(quota)} />
               <p className="mt-2 text-center text-[11px] text-chat-muted">
                 Proveri termine, cene i dostupnost pre odluke.
               </p>

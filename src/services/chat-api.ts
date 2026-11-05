@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import type { ChatRequest, ChatResponse } from '../types/chat';
+import type { ChatRequest, ChatResponse, PendingImage } from '../types/chat';
 import { getAnonymousId } from '../utils/anonymous-id';
 
 interface BackendValidationError {
@@ -52,6 +52,9 @@ export class PromptLimitError extends ApiError {
 }
 
 const getErrorMessage = (status: number, payload: BackendValidationError | null): string => {
+  if (status >= 400 && status < 500 && typeof payload?.detail === 'string') {
+    return payload.detail;
+  }
   if (status === 422 && Array.isArray(payload?.detail)) {
     const firstError = payload.detail[0];
     if (
@@ -117,17 +120,23 @@ const authHeaders = (accessToken?: string | null): Record<string, string> => {
 export const sendChatMessage = async (
   request: ChatRequest,
   options: ApiRequestOptions = {},
+  images: PendingImage[] = [],
 ): Promise<ChatApiResult> => {
   let response: Response;
 
   try {
+    const body = images.length ? new FormData() : JSON.stringify(request);
+    const headers = authHeaders(options.accessToken);
+    if (body instanceof FormData) {
+      body.append('request', JSON.stringify(request));
+      images.forEach(({ file }) => body.append('images', file));
+    } else {
+      headers['Content-Type'] = 'application/json';
+    }
     response = await fetch(`${API_BASE_URL}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders(options.accessToken),
-      },
-      body: JSON.stringify(request),
+      headers,
+      body,
       signal: options.signal,
     });
   } catch (error) {
