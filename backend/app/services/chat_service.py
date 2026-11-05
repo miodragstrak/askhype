@@ -4,6 +4,8 @@ from app.providers.gemini import GeminiProvider
 from app.providers.mock import MockAIProvider
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.hype_retrieval import HypeRetriever, hype_retriever, hype_topic
+from app.services.public_sources import PublicSourceReader, public_source_reader
+from app.services.source_response import build_source_response
 
 
 class UnsupportedAIProviderError(RuntimeError):
@@ -11,14 +13,25 @@ class UnsupportedAIProviderError(RuntimeError):
 
 
 class ChatService:
-    def __init__(self, provider: AIProvider | None = None, retriever: HypeRetriever | None = None) -> None:
+    def __init__(
+        self,
+        provider: AIProvider | None = None,
+        retriever: HypeRetriever | None = None,
+        source_reader: PublicSourceReader | None = None,
+    ) -> None:
         self.provider = provider or self._provider_from_settings()
         self.retriever = retriever or hype_retriever
+        self.source_reader = source_reader or public_source_reader
 
     async def generate_response(self, request: ChatRequest) -> ChatResponse:
         if hype_topic(request.message):
             context = await self.retriever.retrieve(request.message)
             return await self.provider.generate_chat_response(request, hype_context=context)
+        source_context = await self.source_reader.retrieve(request.message)
+        if source_context is not None:
+            if not source_context.documents:
+                return build_source_response(source_context, request, self.provider.provider_name)
+            return await self.provider.generate_chat_response(request, source_context=source_context)
         return await self.provider.generate_chat_response(request)
 
     def _provider_from_settings(self) -> AIProvider:

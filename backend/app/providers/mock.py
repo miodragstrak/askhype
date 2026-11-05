@@ -4,6 +4,8 @@ from uuid import NAMESPACE_URL, uuid5
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
+from app.services.public_sources import PublicSourceContext, select_excerpts
+from app.services.source_response import build_source_response
 
 
 MOCK_GENERATED_AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -13,12 +15,27 @@ MOCK_LAST_VERIFIED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 class MockAIProvider:
     provider_name = "mock"
 
-    async def generate_chat_response(self, request: ChatRequest, *, hype_context: HypeContext | None = None) -> ChatResponse:
+    async def generate_chat_response(
+        self,
+        request: ChatRequest,
+        *,
+        hype_context: HypeContext | None = None,
+        source_context: PublicSourceContext | None = None,
+    ) -> ChatResponse:
         if hype_context is not None:
             return build_hype_response(
                 hype_context,
                 conversation_id=request.conversation_id or self._conversation_id(request),
                 provider=self.provider_name,
+            )
+        if source_context is not None:
+            return build_source_response(
+                source_context, request, self.provider_name,
+                summary="Mock mode — extracted source excerpts:\n\n" + "\n\n".join(
+                    f"{doc.title}\n{select_excerpts(doc.text, request.message, 2000)}"
+                    for doc in source_context.documents
+                ),
+                answer_type="source_summary",
             )
         scenario = self._detect_scenario(request.message)
         conversation_id = request.conversation_id or self._conversation_id(request)

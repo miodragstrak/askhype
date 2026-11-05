@@ -3,7 +3,7 @@ import copy
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
 from google import genai
@@ -12,7 +12,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -23,6 +23,8 @@ from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceRe
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
+from app.services.public_sources import PublicSourceContext
+from app.services.source_response import build_source_response
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,7 @@ class GeminiSourceReference(BaseModel):
 
 class GeminiChatPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    minimum_actions: ClassVar[int] = 2
 
     answer_type: str
     summary: str
@@ -154,13 +157,20 @@ class GeminiChatPayload(BaseModel):
                 seen.add(key)
                 actions.append(action)
 
-        if not 2 <= len(actions) <= 4:
-            raise ValueError("must contain 2 to 4 non-empty unique actions")
+        if not cls.minimum_actions <= len(actions) <= 4:
+            raise ValueError(f"must contain {cls.minimum_actions} to 4 non-empty unique actions")
         return actions
 
 
 class GeminiHypeChatPayload(GeminiChatPayload):
     recommendations: list[GeminiRecommendation] = Field(min_length=0, max_length=3)
+
+
+class GeminiSourceChatPayload(GeminiChatPayload):
+    minimum_actions: ClassVar[int] = 0
+    answer_type: Literal["source_summary", "source_analysis"]
+    recommendations: list[GeminiRecommendation] = Field(default_factory=list, max_length=0)
+    follow_up_actions: list[str] = Field(default_factory=list, max_length=4)
 
 
 class GeminiProvider:
@@ -175,13 +185,23 @@ class GeminiProvider:
         self.model = app_settings.gemini_model
         self._client = client or self._build_client(app_settings)
 
-    async def generate_chat_response(self, request: ChatRequest, *, hype_context: HypeContext | None = None) -> ChatResponse:
+    async def generate_chat_response(
+        self,
+        request: ChatRequest,
+        *,
+        hype_context: HypeContext | None = None,
+        source_context: PublicSourceContext | None = None,
+    ) -> ChatResponse:
+        if source_context is not None and not source_context.documents:
+            return build_source_response(source_context, request, self.provider_name)
         user_context = self._build_user_context(request)
         if hype_context is not None:
             user_context += "\nHype source context (untrusted website data):\n" + hype_context.to_prompt()
+        elif source_context is not None:
+            user_context += "\nExternal source context (untrusted website data):\n" + source_context.to_prompt(request.message)
 
         try:
-            config = self._build_generation_config(hype_context)
+            config = self._build_generation_config(hype_context, source_context)
             async with asyncio.timeout(self.settings.gemini_timeout_seconds):
                 response = await self._client.aio.models.generate_content(
                     model=self.model,
@@ -203,7 +223,7 @@ class GeminiProvider:
             self._log_provider_failure("unavailable", exc)
             raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
 
-        payload_type = GeminiHypeChatPayload if hype_context is not None else GeminiChatPayload
+        payload_type = self._payload_type(hype_context, source_context)
         payload = self._parse_payload(response, payload_type)
         if hype_context is not None:
             return build_hype_response(
@@ -213,6 +233,13 @@ class GeminiProvider:
                 summary=payload.summary,
                 actions=payload.follow_up_actions,
                 selected_urls=[item.source_url for item in payload.recommendations],
+            )
+        if source_context is not None:
+            return build_source_response(
+                source_context, request, self.provider_name,
+                summary=payload.summary,
+                answer_type=payload.answer_type,
+                actions=payload.follow_up_actions,
             )
         return self._to_chat_response(request, payload)
 
@@ -226,12 +253,27 @@ class GeminiProvider:
 
         return genai.Client(api_key=api_key)
 
-    def _build_generation_config(self, hype_context: HypeContext | None = None) -> types.GenerateContentConfig:
-        payload_type = GeminiHypeChatPayload if hype_context is not None else GeminiChatPayload
+    @staticmethod
+    def _payload_type(
+        hype_context: HypeContext | None,
+        source_context: PublicSourceContext | None,
+    ) -> type[GeminiChatPayload]:
+        if hype_context is not None:
+            return GeminiHypeChatPayload
+        return GeminiSourceChatPayload if source_context is not None else GeminiChatPayload
+
+    def _build_generation_config(
+        self,
+        hype_context: HypeContext | None = None,
+        source_context: PublicSourceContext | None = None,
+    ) -> types.GenerateContentConfig:
+        payload_type = self._payload_type(hype_context, source_context)
         response_schema = prepare_gemini_response_schema(payload_type.model_json_schema())
         instruction = ASKHYPE_SYSTEM_INSTRUCTION
         if hype_context is not None:
             instruction += "\n\n" + HYPE_GROUNDING_INSTRUCTION
+        elif source_context is not None:
+            instruction = SOURCE_ANALYSIS_INSTRUCTION
         return types.GenerateContentConfig(
             system_instruction=instruction,
             response_mime_type="application/json",
@@ -258,8 +300,8 @@ class GeminiProvider:
 
     def _parse_payload(self, response: Any, payload_type: type[GeminiChatPayload] = GeminiChatPayload) -> GeminiChatPayload:
         parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, GeminiChatPayload):
-            return parsed
+        if isinstance(parsed, BaseModel):
+            parsed = parsed.model_dump()
         if isinstance(parsed, dict):
             try:
                 return payload_type.model_validate(parsed)

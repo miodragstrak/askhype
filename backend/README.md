@@ -8,6 +8,56 @@ This backend currently provides the application shell, environment-based configu
 
 The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
+## Explicit public source reading
+
+Generic chat reads explicit HTTP(S) URLs in the **current message** through
+`services/public_sources.py`, independently of Hype retrieval. Existing Hype
+requests retain their existing retrieval/grounding path. No URL discovery,
+linked-page crawling, OCR, file uploads, or new persistent storage is added.
+
+- Read up to 3 distinct URLs per message, with at most 3 redirects per URL.
+- Allow only `text/html`, `application/pdf`, and `text/plain` response MIME types.
+- Require public DNS answers before connecting; reject mixed public/private
+  answers, localhost/internal names, private, loopback, link-local, multicast,
+  reserved, unspecified, shared-address and IPv6 transition/translation ranges,
+  and metadata targets (including Azure's public WireServer IP).
+- Pin each connection to a validated IP. Preserve the original HTTP Host and
+  HTTPS SNI/certificate hostname using HTTPX's `sni_hostname` extension. Repeat
+  validation on every redirect; disable automatic redirects and environment
+  proxies. No user credentials or application auth headers are forwarded.
+- Enforce a 12-second total DNS/fetch deadline per URL, 5-second HTTP operation
+  timeouts, a 2,048-character URL limit, and a 10 MiB response limit checked
+  against both Content-Length and streamed bytes. Request identity encoding
+  and reject compressed responses to avoid decompression size-limit bypasses.
+- Extract HTML with the existing BeautifulSoup dependency, selecting main/article
+  content and removing scripts, styles, navigation and common boilerplate.
+  Extract PDF text with `pypdf>=6.21.4,<7`; retain metadata titles and page labels.
+  Encrypted, malformed and image-only PDFs return explicit unsupported messages.
+  Plain text honors the declared character encoding. Missing titles fall back
+  to the URL filename or hostname.
+- Run extraction in a disposable worker: 8-second wall deadline, 6 CPU seconds
+  and 768 MiB address-space limit on Linux. Kill and reap timed-out/cancelled
+  workers. Retain at most 100 PDF pages and 200,000 extracted characters.
+- Supply at most 10,000 characters per source and 40,000 characters for the
+  complete serialized source JSON, including metadata and failures. Select
+  excerpts deterministically from the beginning, query-ranked chunks and ending;
+  preserve source order and label partial content. These are character limits,
+  not token counts.
+
+Gemini uses a separate source-analysis instruction/schema that puts the answer
+in `summary`, with `answer_type` `source_summary` or `source_analysis`, empty
+recommendations and optional follow-up actions. Excerpts are untrusted data;
+the instruction requires source-grounded facts, labelled inference and disclosure
+of missing/partial evidence. The server builds `sources` from retrieved documents
+and timestamps; model-generated citation URLs are discarded. The existing frontend
+response types already support these answer types and empty arrays.
+
+If every retrieval fails, return `source_unavailable`, a localized explanation
+and an invitation to supply the PDF/text, without calling Gemini or padding with
+recommendation cards. Partial success answers from successful sources and appends
+a disclosure for failed links. Mock mode returns labelled extracted excerpts,
+without generating an analysis. Source retrieval is not cached or persisted.
+
 ## Folder Structure
 
 ```text
