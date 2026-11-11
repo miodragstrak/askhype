@@ -183,7 +183,7 @@ export const ConversationThread = ({
     {messages.map((message) =>
       message.role === 'user' ? (
         <div key={message.id} className="flex justify-end">
-          <div className="max-w-[88%] rounded-2xl rounded-br-md bg-chat-hover px-4 py-3 text-[15px] leading-6 text-white sm:max-w-[75%]">
+          <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--app-user-message)] px-4 py-3 text-[15px] leading-6 text-white sm:max-w-[75%]">
             {message.imagePreviews?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.imagePreviews.map((url, index) => <img key={url} src={url} alt={`Priložena slika ${index + 1}`} className="max-h-40 max-w-40 rounded-lg object-contain" />)}</div> : null}
             <p className="whitespace-pre-wrap break-words">{message.text}</p>
           </div>

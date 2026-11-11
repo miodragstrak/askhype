@@ -1,29 +1,81 @@
 @import "tailwindcss";
 
-@theme {
-  --color-navy-900: #0f172a;
-  --color-navy-800: #1e293b;
-  --color-navy-700: #334155;
-  --color-navy-600: #475569;
-  --color-hype-yellow: #fcd34d;
-  --color-hype-light: #f8fafc;
-  --color-hype-white: #ffffff;
-  --color-hype-gray: #f1f5f9;
-  --color-hype-blue: #253c91;
-  --color-chat-bg: #1b2c68;
-  --color-chat-surface: #152354;
-  --color-chat-elevated: #22377f;
-  --color-chat-hover: #2d4696;
-  --color-chat-border: #40558f;
-  --color-chat-outline: #8096cf;
-  --color-chat-text: #f8fafc;
-  --color-chat-muted: #c3cee8;
-  --color-chat-source: #bfdbfe;
-  --color-chat-source-border: #7ab6f5;
+:root,
+:root[data-theme="light"] {
+  --app-background: #ffffff;
+  --app-surface: #ffffff;
+  --app-elevated: #f6f8fb;
+  --app-text-primary: #101828;
+  --app-text-secondary: #667085;
+  --app-text-tertiary: #475467;
+  --app-border: #dfe4ec;
+  --app-hover: #edf2f7;
+  --app-selected: #dce7ff;
+  --app-composer: #f6f8fb;
+  --app-user-message: #253c91;
+  --app-hype-blue: #253c91;
+  --app-hype-badge-text: #e8f1ff;
+  --app-hype-badge-border: #5276d8;
+  --app-yellow: #fcd34d;
+  --app-yellow-soft: #fffbeb;
+  --app-focus-ring: #3455b2;
+  --app-danger-soft: #fef2f2;
+  --app-danger-border: #fecaca;
+  --app-danger-text: #991b1b;
 }
 
-.askhype-conversation {
-  color-scheme: dark;
+:root[data-theme="dark"] {
+  --app-background: #0b1220;
+  --app-surface: #121a2b;
+  --app-elevated: #182236;
+  --app-text-primary: #f8fafc;
+  --app-text-secondary: #b8c3d6;
+  --app-text-tertiary: #d1d9e6;
+  --app-border: #2b3850;
+  --app-hover: #22304a;
+  --app-selected: #253c66;
+  --app-composer: #182236;
+  --app-user-message: #29489f;
+  --app-hype-blue: #3155bd;
+  --app-hype-badge-text: #e0ecff;
+  --app-hype-badge-border: #7096f0;
+  --app-yellow: #fcd34d;
+  --app-yellow-soft: #302a16;
+  --app-focus-ring: #8aa8ff;
+  --app-danger-soft: #351b22;
+  --app-danger-border: #7f3545;
+  --app-danger-text: #fecdd3;
+}
+
+@theme {
+  --color-navy-900: var(--app-text-primary);
+  --color-navy-800: var(--app-text-primary);
+  --color-navy-700: var(--app-text-tertiary);
+  --color-navy-600: var(--app-text-secondary);
+  --color-navy-500: var(--app-text-secondary);
+  --color-navy-200: var(--app-border);
+  --color-hype-yellow: var(--app-yellow);
+  --color-hype-light: var(--app-background);
+  --color-hype-white: var(--app-surface);
+  --color-hype-gray: var(--app-elevated);
+  --color-hype-blue: var(--app-hype-blue);
+  --color-chat-bg: var(--app-background);
+  --color-chat-surface: var(--app-surface);
+  --color-chat-elevated: var(--app-elevated);
+  --color-chat-hover: var(--app-hover);
+  --color-chat-border: var(--app-border);
+  --color-chat-outline: var(--app-focus-ring);
+  --color-chat-text: var(--app-text-primary);
+  --color-chat-muted: var(--app-text-secondary);
+  --color-chat-source: var(--app-hype-badge-text);
+  --color-chat-source-border: var(--app-hype-badge-border);
+  --color-focus-ring: var(--app-focus-ring);
+  --color-yellow-50: var(--app-yellow-soft);
+  --color-slate-100: var(--app-elevated);
+  --color-slate-200: var(--app-border);
+  --color-red-50: var(--app-danger-soft);
+  --color-red-200: var(--app-danger-border);
+  --color-red-900: var(--app-danger-text);
 }
 
 * {
@@ -50,8 +102,10 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8fafc;
+  background-color: var(--app-background);
+  color: var(--app-text-primary);
   overflow-x: hidden;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 /* Scrollbar Hide Utility */

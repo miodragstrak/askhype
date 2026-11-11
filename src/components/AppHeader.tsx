@@ -3,6 +3,7 @@ import { MapPin, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AskHypeLogo } from './branding/AskHypeLogo';
 import { useAuth } from '../auth';
+import { ThemeToggle } from './ThemeToggle';
 
 interface AppHeaderProps {
   title?: string;
@@ -47,17 +48,20 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               <span className="truncate">{location}</span>
             </div>
           </div>
-          <button
-            onClick={() => navigate('/profile')}
-            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-hype-gray transition"
-            aria-label={profileLabel}
-          >
-            {initials ? (
-              <span className="text-xs font-bold text-navy-900">{initials}</span>
-            ) : (
-              <User size={18} className="text-navy-900" />
-            )}
-          </button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <button
+              onClick={() => navigate('/profile')}
+              className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-hype-gray transition"
+              aria-label={profileLabel}
+            >
+              {initials ? (
+                <span className="text-xs font-bold text-navy-900">{initials}</span>
+              ) : (
+                <User size={18} className="text-navy-900" />
+              )}
+            </button>
+          </div>
         </div>
       </header>
     );
@@ -90,19 +94,22 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             </div>
           </div>
         </div>
-        {!showBack && (
-          <button
-            onClick={() => navigate('/profile')}
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full hover:bg-hype-gray transition"
-            aria-label={profileLabel}
-          >
-            {initials ? (
-              <span className="text-xs font-bold text-navy-900">{initials}</span>
-            ) : (
-              <User size={18} className="text-navy-900" />
-            )}
-          </button>
-        )}
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <ThemeToggle />
+          {!showBack && (
+            <button
+              onClick={() => navigate('/profile')}
+              className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-hype-gray transition"
+              aria-label={profileLabel}
+            >
+              {initials ? (
+                <span className="text-xs font-bold text-navy-900">{initials}</span>
+              ) : (
+                <User size={18} className="text-navy-900" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );

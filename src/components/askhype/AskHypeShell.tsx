@@ -8,6 +8,7 @@ import type { PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
 import { storageUtils } from '../../utils';
 import { AskHypeLogo } from '../branding/AskHypeLogo';
+import { ThemeToggle } from '../ThemeToggle';
 import {
   conversationTitle,
   loadActiveConversationId,
@@ -206,6 +207,7 @@ export const AskHypeShell = () => {
               {usage.remaining} pitanja
             </span>
           )}
+          <ThemeToggle conversation />
           <button
             type="button"
             onClick={startNew}

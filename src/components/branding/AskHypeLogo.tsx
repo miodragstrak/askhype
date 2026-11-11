@@ -30,7 +30,7 @@ export const AskHypeLogo: React.FC<AskHypeLogoProps> = ({
       to="/"
       aria-label="AskHype početna"
       className={clsx(
-        'inline-flex min-w-0 flex-shrink-0 items-center',
+        'inline-flex min-w-0 flex-shrink-0 items-center rounded-md bg-white px-1 py-0.5',
         className
       )}
     >

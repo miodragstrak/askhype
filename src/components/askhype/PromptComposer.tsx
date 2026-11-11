@@ -44,7 +44,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   };
 
   return (
-    <div className="rounded-2xl border border-chat-outline bg-chat-elevated p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
+    <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
       {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
       {validationError && <p className="px-2 pb-1 text-xs text-red-600">{validationError}</p>}
       <div className="flex items-end gap-2">
