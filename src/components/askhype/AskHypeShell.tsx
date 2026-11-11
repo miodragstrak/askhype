@@ -197,7 +197,7 @@ export const AskHypeShell = () => {
           </button>
           <AskHypeLogo
             variant="conversation"
-            className="min-h-11 rounded-md px-1 py-1 focus:outline-none focus:ring-2 focus:ring-hype-yellow"
+            className="focus:outline-none focus:ring-2 focus:ring-hype-yellow"
           />
         </div>
 

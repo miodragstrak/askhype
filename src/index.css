@@ -22,6 +22,7 @@
   --app-danger-soft: #fef2f2;
   --app-danger-border: #fecaca;
   --app-danger-text: #991b1b;
+  --app-logo-backing: transparent;
 }
 
 :root[data-theme="dark"] {
@@ -45,6 +46,7 @@
   --app-danger-soft: #351b22;
   --app-danger-border: #7f3545;
   --app-danger-text: #fecdd3;
+  --app-logo-backing: rgba(248, 250, 252, 0.96);
 }
 
 @theme {
