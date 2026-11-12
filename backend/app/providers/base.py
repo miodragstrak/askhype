@@ -4,6 +4,7 @@ from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlan
+from app.schemas.presentations import PresentationPlan
 from app.services.hype_retrieval import HypeContext
 from app.services.public_sources import PublicSourceContext
 
@@ -32,3 +33,8 @@ class AIProvider(Protocol):
         self, instruction: str, document: ExtractedDocument
     ) -> TransformationPlan:
         """Convert a user instruction into one allowlisted XLSX operation."""
+
+    async def generate_presentation_plan(
+        self, prompt: str, slide_count: int, document: ExtractedDocument | None
+    ) -> PresentationPlan:
+        """Create a strict presentation plan, optionally grounded in one document."""

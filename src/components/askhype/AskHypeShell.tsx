@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, sendChatMessage, sendDocumentAnalysis, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
 import type { ChatResponse, DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
@@ -118,7 +118,25 @@ export const AskHypeShell = () => {
 
     try {
       let result;
-      if (document) {
+      if (documentAction === 'presentation') {
+        const presentation = await sendPresentationGeneration(
+          prompt, document?.file ?? null, { accessToken: session?.access_token },
+        );
+        const warningText = presentation.warnings.length
+          ? `\n\nNapomene:\n${presentation.warnings.map((warning) => `• ${warning}`).join('\n')}`
+          : '';
+        const data: ChatResponse = {
+          conversation_id: conversation.serverConversationId || `pptx_${createId()}`,
+          provider: 'document', answer_type: 'presentation_generation',
+          summary: presentation.summary + warningText,
+          recommendations: [], follow_up_actions: [],
+          sources: document ? [{ title: document.file.name }] : [],
+          generated_at: new Date().toISOString(),
+          presentation_slide_count: presentation.slideCount,
+          download: { filename: presentation.filename, url: URL.createObjectURL(presentation.blob), available: true },
+        };
+        result = { data, usage: presentation.usage };
+      } else if (document) {
         if (documentAction === 'transform') {
           const transformed = await sendXlsxTransformation(
             document.file, prompt, { accessToken: session?.access_token },

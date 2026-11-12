@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, FileText, ImagePlus, X } from 'lucide-react';
+import { ArrowUp, FileText, ImagePlus, Presentation, X } from 'lucide-react';
 import type { DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 
 interface PromptComposerProps {
@@ -50,6 +50,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   const selectImages = (files: FileList | null) => {
     if (!files) return;
+    if (documentAction === 'presentation') return setValidationError('Slike nisu podržane kao izvor za prezentaciju.');
     if (document) return setValidationError('Ukloni dokument pre dodavanja slika.');
     const selected = [...files];
     if (images.length + selected.length > 3) return setValidationError('Možeš poslati najviše 3 slike u jednoj poruci.');
@@ -74,12 +75,25 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
     setImages([]);
     setDocument({ file });
-    if (documentAction !== 'transform') setDocumentAction('analyze');
     setValidationError(null);
   };
 
   return (
     <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
+      <div className="flex items-center justify-end px-1 pb-1">
+        <button
+          type="button"
+          onClick={() => {
+            setDocumentAction((current) => current === 'presentation' ? 'analyze' : 'presentation');
+            images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+            setImages([]);
+            setValidationError(null);
+          }}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${documentAction === 'presentation' ? 'bg-hype-blue text-white' : 'text-chat-muted hover:bg-chat-hover hover:text-chat-text'}`}
+        >
+          <Presentation size={14} /> {documentAction === 'presentation' ? 'Prezentacija' : 'Napravi prezentaciju'}
+        </button>
+      </div>
       {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
       {document && (
         <div className="m-1 flex items-center gap-3 rounded-xl border border-chat-border bg-chat-surface px-3 py-2">
@@ -88,7 +102,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
             <p className="truncate text-sm font-medium text-chat-text">{document.file.name}</p>
             <p className="text-[11px] uppercase text-chat-muted">{document.file.name.split('.').pop()} · dokument</p>
           </div>
-          {document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
+          {documentAction !== 'presentation' && document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
             <div className="flex rounded-lg border border-chat-border p-0.5 text-[11px]">
               <button type="button" onClick={() => setDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
               <button type="button" onClick={() => setDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
@@ -117,7 +131,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           autoFocus={autoFocus}
           disabled={disabled}
           aria-label="Poruka za AskHype"
-          placeholder={documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
+          placeholder={documentAction === 'presentation' ? 'Opiši PowerPoint prezentaciju...' : documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
           className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button

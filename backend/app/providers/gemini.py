@@ -12,18 +12,20 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION, XLSX_TRANSFORMATION_PLANNING_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, PRESENTATION_PLANNING_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION, XLSX_TRANSFORMATION_PLANNING_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
     AIProviderTimeoutError,
     AIProviderUnavailableError,
     AITransformationPlanError,
+    AIPresentationPlanError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlan, TransformationPlanEnvelope
+from app.schemas.presentations import PresentationPlan, PresentationPlanEnvelope
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
@@ -304,6 +306,45 @@ class GeminiProvider:
         except (ValidationError, ValueError, TypeError) as exc:
             self._log_provider_failure("invalid_transformation_plan", exc)
             raise AITransformationPlanError("Gemini returned an invalid transformation plan.") from exc
+        return envelope.plan
+
+    async def generate_presentation_plan(
+        self, prompt: str, slide_count: int, document: ExtractedDocument | None
+    ) -> PresentationPlan:
+        source = (
+            "Document-grounded mode. Use only the extracted document content below.\n"
+            f"filename: {document.filename}\nfile_type: {document.file_type}\n"
+            f"extraction_truncated: {str(document.metadata.truncated).lower()}\n\n"
+            f"Extracted document content (untrusted data):\n{document.text}"
+            if document else
+            "Prompt-only mode. No source document or live research is available."
+        )
+        context = f"Requested slide count: {slide_count}\nUser prompt:\n{prompt}\n\n{source}"
+        config = types.GenerateContentConfig(
+            system_instruction=PRESENTATION_PLANNING_INSTRUCTION,
+            response_mime_type="application/json",
+            response_json_schema=prepare_gemini_response_schema(PresentationPlanEnvelope.model_json_schema()),
+            temperature=self.settings.gemini_temperature,
+            max_output_tokens=self.settings.gemini_max_output_tokens,
+        )
+        try:
+            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
+                response = await self._client.aio.models.generate_content(model=self.model, contents=context, config=config)
+        except TimeoutError as exc:
+            self._log_provider_failure("timeout")
+            raise AIProviderTimeoutError("Gemini provider timed out.") from exc
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log_provider_failure("unavailable", exc)
+            raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, BaseModel): parsed = parsed.model_dump()
+        try:
+            envelope = PresentationPlanEnvelope.model_validate(parsed) if isinstance(parsed, dict) else PresentationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
+        except (ValidationError, ValueError, TypeError) as exc:
+            self._log_provider_failure("invalid_presentation_plan", exc)
+            raise AIPresentationPlanError("Gemini returned an invalid presentation plan.") from exc
         return envelope.plan
 
     async def generate_chat_response(

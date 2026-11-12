@@ -10,7 +10,7 @@ export type LocalMessage =
       // Display metadata only; uploaded document bytes are never persisted.
       documentName?: string;
       documentType?: string;
-      documentAction?: 'analyze' | 'transform';
+      documentAction?: 'analyze' | 'transform' | 'presentation';
       createdAt: string;
     }
   | {

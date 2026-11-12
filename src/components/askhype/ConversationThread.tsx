@@ -42,10 +42,10 @@ const AssistantResponse = ({
 
     {response.download && (response.download.url ? (
       <a href={response.download.url} download={response.download.filename} className="inline-flex items-center gap-2 rounded-full bg-hype-blue px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-hype-yellow">
-        <Download size={16} /> Preuzmi Excel
+        <Download size={16} /> {response.answer_type === 'presentation_generation' ? 'Preuzmi PowerPoint' : 'Preuzmi Excel'}
       </a>
     ) : (
-      <p className="text-xs text-chat-muted">Preuzimanje više nije dostupno nakon ponovnog učitavanja. Ponovi izmenu za novi fajl.</p>
+      <p className="text-xs text-chat-muted">Preuzimanje više nije dostupno nakon ponovnog učitavanja. Ponovi generisanje za novi fajl.</p>
     ))}
 
     {response.recommendations.length > 0 && (

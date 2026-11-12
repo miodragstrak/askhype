@@ -45,6 +45,15 @@ export interface XlsxTransformationApiResult {
   usage: UsageSnapshot | null;
 }
 
+export interface PresentationApiResult {
+  blob: Blob;
+  filename: string;
+  slideCount: number;
+  summary: string;
+  warnings: string[];
+  usage: UsageSnapshot | null;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -266,6 +275,45 @@ export const sendXlsxTransformation = async (
     filename: decodedHeader(response, 'X-AskHype-Output-Filename', 'workbook_transformed.xlsx'),
     operation: response.headers.get('X-AskHype-Transformation-Operation') || 'transformation',
     summary: decodedHeader(response, 'X-AskHype-Transformation-Summary', 'Excel dokument je uspešno izmenjen.'),
+    warnings,
+    usage: readUsageHeaders(response),
+  };
+};
+
+export const sendPresentationGeneration = async (
+  prompt: string,
+  file: File | null,
+  options: ApiRequestOptions = {},
+): Promise<PresentationApiResult> => {
+  const body = new FormData();
+  body.append('prompt', prompt);
+  if (file) body.append('file', file);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/presentations/generate`, {
+      method: 'POST', headers: authHeaders(options.accessToken), body, signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Zahtev je otkazan.');
+    throw new ApiError('PowerPoint prezentaciju trenutno nije moguće napraviti. Pokušaj ponovo.', 0);
+  }
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    if (response.status === 429 && isQuotaLimitPayload(payload?.detail)) throw new PromptLimitError(payload.detail);
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+  const warningHeader = decodedHeader(response, 'X-AskHype-Presentation-Warnings', '[]');
+  let warnings: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(warningHeader);
+    if (Array.isArray(parsed)) warnings = parsed.filter((item): item is string => typeof item === 'string');
+  } catch { warnings = []; }
+  return {
+    blob: await response.blob(),
+    filename: decodedHeader(response, 'X-AskHype-Output-Filename', 'askhype_presentation.pptx'),
+    slideCount: Number(response.headers.get('X-AskHype-Presentation-Slide-Count')) || 0,
+    summary: decodedHeader(response, 'X-AskHype-Presentation-Summary', 'PowerPoint prezentacija je napravljena.'),
     warnings,
     usage: readUsageHeaders(response),
   };

@@ -5,6 +5,7 @@ from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceRe
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlan, UnsupportedPlan
+from app.schemas.presentations import BulletsSlide, ConclusionSlide, PresentationPlan, SectionSlide, TitleSlide
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
 from app.services.public_sources import PublicSourceContext, select_excerpts
@@ -31,6 +32,16 @@ class MockAIProvider:
             operation="unsupported",
             reason="Mock provider does not infer spreadsheet transformations.",
         )
+
+    async def generate_presentation_plan(
+        self, prompt: str, slide_count: int, document: ExtractedDocument | None
+    ) -> PresentationPlan:
+        slides = [TitleSlide(type="title", title="AskHype prezentacija", subtitle=prompt[:180])]
+        while len(slides) < slide_count - 1:
+            index = len(slides)
+            slides.append(SectionSlide(type="section", title=f"Tema {index}", subtitle="Sažet pregled ključne teme."))
+        slides.append(ConclusionSlide(type="conclusion", title="Zaključak", bullets=["Ključne tačke su sažete za dalji razgovor."]))
+        return PresentationPlan(title="AskHype prezentacija", subtitle=None, slides=slides)
 
     async def generate_chat_response(
         self,

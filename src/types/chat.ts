@@ -12,7 +12,7 @@ export interface PendingDocument {
   file: File;
 }
 
-export type DocumentAction = 'analyze' | 'transform';
+export type DocumentAction = 'analyze' | 'transform' | 'presentation';
 
 export interface TransformationDownload {
   filename: string;
@@ -57,6 +57,7 @@ export interface ChatResponse {
   sources: SourceReference[];
   generated_at: string;
   download?: TransformationDownload;
+  presentation_slide_count?: number;
 }
 
 export interface ChatRecommendation {

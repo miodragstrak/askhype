@@ -585,6 +585,17 @@ formulas, code, macros, `.xls`/`.xlsm`, pivots and charts are not supported.
 Downloads are ephemeral: the browser stores only the filename and textual
 summary in conversation history, so a reload requires repeating the operation.
 
+## PowerPoint generation
+
+`POST /api/presentations/generate` accepts multipart `prompt` and an optional
+single PDF, DOCX, XLSX or CSV `file`. Gemini creates a strict plan of 3–12
+allowlisted slides; `python-pptx` renders an editable 16:9 presentation in
+memory using the AskHype marine, blue, white and yellow theme. The response is
+a `.pptx` attachment with filename, slide count, summary and warning headers.
+Document-backed plans are grounded only in extracted upload content. No remote
+media, arbitrary XML/code, templates, charts, macros or permanent file storage
+are used. Browser downloads are ephemeral and must be regenerated after reload.
+
 ## Limitations
 
 - Supabase schema and RPC behavior still require staging verification
