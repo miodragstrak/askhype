@@ -310,6 +310,8 @@ def test_raw_presentation_schema_exposes_gemini_incompatible_union_keywords() ->
 
     assert len(_find_key(raw, "discriminator")) == 1
     assert len(_find_key(raw, "const")) == 6
+    assert len(_find_key(raw, "minLength")) == 11
+    assert len(_find_key(raw, "maxLength")) == 16
     assert len(_find_key(raw, "oneOf")) == 1
 
 
@@ -318,6 +320,8 @@ def test_prepared_presentation_schema_normalizes_union_without_weakening_it() ->
 
     assert _find_key(schema, "discriminator") == []
     assert _find_key(schema, "const") == []
+    assert _find_key(schema, "minLength") == []
+    assert _find_key(schema, "maxLength") == []
     slide_items = schema["properties"]["plan"]["properties"]["slides"]["items"]
     assert "oneOf" in slide_items
     assert len(slide_items["oneOf"]) == 6
@@ -329,6 +333,26 @@ def test_prepared_presentation_schema_normalizes_union_without_weakening_it() ->
     assert slide_items["oneOf"][0]["properties"]["type"]["enum"] == ["title"]
     assert schema["properties"]["plan"]["properties"]["slides"]["minItems"] == 3
     assert schema["properties"]["plan"]["properties"]["slides"]["maxItems"] == 12
+
+
+def test_prepared_presentation_schema_uses_only_supported_gemini_keywords() -> None:
+    supported = {
+        "type", "title", "description", "enum", "items", "prefixItems",
+        "minItems", "maxItems", "minimum", "maximum", "anyOf", "oneOf",
+        "properties", "additionalProperties", "required", "$id", "$defs",
+        "$ref", "$anchor", "propertyOrdering",
+    }
+    schema = prepare_gemini_response_schema(PresentationPlanEnvelope.model_json_schema())
+
+    assert _unsupported_schema_keywords(schema, supported) == []
+
+
+def test_application_presentation_length_validation_remains_strict() -> None:
+    payload = _presentation_payload()
+    payload["plan"]["title"] = "x" * 101
+
+    with pytest.raises(ValidationError):
+        PresentationPlanEnvelope.model_validate(payload)
 
 
 def test_presentation_invalid_argument_schema_error_is_not_unavailable() -> None:
@@ -677,6 +701,35 @@ def _missing_required_properties(value: object) -> list[str]:
         for item in value:
             missing.extend(_missing_required_properties(item))
     return missing
+
+
+def _unsupported_schema_keywords(
+    value: object,
+    supported: set[str],
+    path: str = "$",
+    *,
+    named_schema_map: bool = False,
+) -> list[str]:
+    unsupported: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            next_path = f"{path}.{key}"
+            if not named_schema_map and key not in supported:
+                unsupported.append(next_path)
+            unsupported.extend(
+                _unsupported_schema_keywords(
+                    item,
+                    supported,
+                    next_path,
+                    named_schema_map=key in {"properties", "$defs"},
+                )
+            )
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            unsupported.extend(
+                _unsupported_schema_keywords(item, supported, f"{path}[{index}]")
+            )
+    return unsupported
 
 
 def _settings(api_key: str = "test-secret-key") -> Settings:

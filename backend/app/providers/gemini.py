@@ -35,7 +35,12 @@ from app.services.source_response import build_source_response
 logger = logging.getLogger(__name__)
 
 _URL_ADAPTER = TypeAdapter(AnyUrl)
-_UNSUPPORTED_GEMINI_SCHEMA_KEYS = frozenset({"default", "discriminator"})
+_UNSUPPORTED_GEMINI_SCHEMA_KEYS = frozenset({
+    "default",
+    "discriminator",
+    "minLength",
+    "maxLength",
+})
 
 
 class GeminiRecommendation(BaseModel):
