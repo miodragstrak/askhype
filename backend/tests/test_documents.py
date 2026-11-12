@@ -1,5 +1,7 @@
 import asyncio
 import io
+import re
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -8,6 +10,7 @@ import httpx
 import pytest
 from docx import Document
 from openpyxl import Workbook
+from openpyxl import load_workbook
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from starlette.datastructures import UploadFile
@@ -66,6 +69,18 @@ def _xlsx_bytes() -> bytes:
     return output.getvalue()
 
 
+def _xlsx_without_dimension_metadata() -> bytes:
+    source = io.BytesIO(_xlsx_bytes())
+    output = io.BytesIO()
+    with zipfile.ZipFile(source) as original, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as rewritten:
+        for item in original.infolist():
+            content = original.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                content = re.sub(br"<dimension[^>]*/>", b"", content, count=1)
+            rewritten.writestr(item, content)
+    return output.getvalue()
+
+
 def test_pdf_text_extraction() -> None:
     result = extract_document(_pdf_bytes(), "izvestaj.pdf", "application/pdf")
     assert "Prihod je porastao" in result.text
@@ -91,6 +106,54 @@ def test_xlsx_sheet_names_and_cells_are_extracted() -> None:
     assert result.metadata.sheet_names == ["Prodaja", "Troškovi"]
     assert "Srbija | 1250" in result.text
     assert result.metadata.rows_processed == 3
+
+
+def test_xlsx_without_dimension_metadata_is_extracted() -> None:
+    body = _xlsx_without_dimension_metadata()
+    workbook = load_workbook(io.BytesIO(body), read_only=True)
+    try:
+        assert workbook["Prodaja"].max_row is None
+        assert workbook["Prodaja"].max_column is None
+    finally:
+        workbook.close()
+
+    result = extract_document(
+        body, "bez-dimenzija.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    assert result.metadata.sheet_names == ["Prodaja", "Troškovi"]
+    assert "[Radni list: Prodaja]" in result.text
+    assert "Srbija | 1250" in result.text
+    assert result.metadata.rows_processed == 3
+    assert result.metadata.columns_processed == 2
+
+
+def test_xlsx_iteration_enforces_row_and_column_limits() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Veliki list"
+    for row_number in range(1, 202):
+        sheet.cell(row=row_number, column=1, value=f"red-{row_number}")
+    for column_number in range(2, 51):
+        sheet.cell(row=1, column=column_number, value=f"kolona-{column_number}")
+    sheet.cell(row=1, column=51, value="izvan-limita")
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+
+    result = extract_document(
+        output.getvalue(), "veliki.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    assert result.metadata.rows_processed == 200
+    assert result.metadata.columns_processed == 50
+    assert result.metadata.truncated is True
+    assert "Po radnom listu obrađeno je najviše 200 redova." in result.warnings
+    assert "Po redu je obrađeno najviše 50 kolona." in result.warnings
+    assert "red-201" not in result.text
+    assert "izvan-limita" not in result.text
 
 
 def test_csv_utf8_and_common_delimiter_are_extracted() -> None:

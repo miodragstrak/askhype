@@ -193,15 +193,17 @@ def _extract_xlsx(body: bytes, filename: str) -> ExtractedDocument:
     try:
         for sheet_name in selected_sheets:
             sheet = workbook[sheet_name]
-            row_limited = row_limited or sheet.max_row > MAX_SPREADSHEET_ROWS
-            column_limited = column_limited or sheet.max_column > MAX_SPREADSHEET_COLUMNS
             if not collector.add(f"[Radni list: {sheet_name}]"):
                 break
-            for row_index, row in enumerate(
-                sheet.iter_rows(max_row=MAX_SPREADSHEET_ROWS, max_col=MAX_SPREADSHEET_COLUMNS, values_only=True),
-                start=1,
-            ):
-                values = [_cell_text(value) for value in row]
+            rows = sheet.iter_rows(values_only=True)
+            for row_index, row in enumerate(rows, start=1):
+                if row_index > MAX_SPREADSHEET_ROWS:
+                    row_limited = True
+                    break
+                column_limited = column_limited or any(
+                    _cell_text(value) for value in row[MAX_SPREADSHEET_COLUMNS:]
+                )
+                values = [_cell_text(value) for value in row[:MAX_SPREADSHEET_COLUMNS]]
                 while values and not values[-1]:
                     values.pop()
                 if not values:
