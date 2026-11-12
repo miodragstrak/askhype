@@ -386,7 +386,7 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             system_instruction=PRESENTATION_PLANNING_INSTRUCTION,
             response_mime_type="application/json",
-            response_json_schema=prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema()),
+            response_json_schema=prepare_gemini_presentation_schema(),
             temperature=self.settings.gemini_temperature,
             max_output_tokens=self.settings.gemini_max_output_tokens,
         )
@@ -647,6 +647,28 @@ def prepare_gemini_response_schema(schema: object) -> object:
     sanitized = sanitize_gemini_schema(expanded)
     validate_schema_required_properties(sanitized)
     return sanitized
+
+
+def prepare_gemini_presentation_schema() -> object:
+    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
+    return remove_schema_keywords(schema, frozenset({"minItems", "maxItems"}))
+
+
+def remove_schema_keywords(
+    value: object,
+    keywords: frozenset[str],
+    *,
+    inside_properties: bool = False,
+) -> object:
+    if isinstance(value, dict):
+        return {
+            key: remove_schema_keywords(item, keywords, inside_properties=key == "properties")
+            for key, item in value.items()
+            if inside_properties or key not in keywords
+        }
+    if isinstance(value, list):
+        return [remove_schema_keywords(item, keywords, inside_properties=inside_properties) for item in value]
+    return value
 
 
 def sanitize_gemini_schema(value: object, *, inside_properties: bool = False) -> object:

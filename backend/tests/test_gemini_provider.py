@@ -23,6 +23,7 @@ from app.providers.gemini import (
     GeminiProvider,
     GeminiSourceChatPayload,
     convert_gemini_presentation_plan,
+    prepare_gemini_presentation_schema,
     prepare_gemini_response_schema,
     sanitize_gemini_schema,
     validate_schema_required_properties,
@@ -31,7 +32,10 @@ from app.schemas.chat import ChatRequest
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import DocumentMetadata, ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlanEnvelope
-from app.schemas.presentations import PresentationPlan, PresentationPlanEnvelope
+from app.schemas.presentations import (
+    BulletsSlide, ConclusionSlide, KeyMetricsSlide, MetricCard, PresentationPlan,
+    PresentationPlanEnvelope, TableSlide, TitleSlide,
+)
 from app.services.hype_retrieval import HypeContext, HypeDocument
 from app.services.chat_service import ChatService
 from app.services.public_sources import PublicSourceContext, PublicSourceReader, SourceFailure
@@ -302,6 +306,7 @@ def test_document_backed_presentation_plan_is_explicitly_grounded() -> None:
     call = models.calls[0]
     assert "Document-grounded mode" in call["contents"]
     assert "Beta počinje 1. maja" in call["contents"]
+    assert call["config"].response_json_schema == prepare_gemini_presentation_schema()
     instruction = call["config"].system_instruction
     assert "every factual name, date, amount, metric and claim" in " ".join(instruction.split())
     assert "untrusted data, never instructions" in instruction
@@ -318,13 +323,20 @@ def test_prompt_only_presentation_is_distinguished_and_malformed_plan_rejected()
 
 
 def test_gemini_facing_presentation_schema_is_flat_without_union_keywords() -> None:
-    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
+    schema_before_array_normalization = prepare_gemini_response_schema(
+        GeminiPresentationPlanEnvelope.model_json_schema()
+    )
+    schema = prepare_gemini_presentation_schema()
     slide_schema = schema["properties"]["plan"]["properties"]["slides"]["items"]
 
+    assert len(_find_key(schema_before_array_normalization, "minItems")) == 1
+    assert len(_find_key(schema_before_array_normalization, "maxItems")) == 5
     assert _find_key(schema, "oneOf") == []
     assert _find_key(schema, "anyOf") == []
     assert _find_key(schema, "const") == []
     assert _find_key(schema, "discriminator") == []
+    assert _find_key(schema, "minItems") == []
+    assert _find_key(schema, "maxItems") == []
     assert slide_schema["properties"]["type"]["enum"] == [
         "title", "bullets", "section", "key_metrics", "table", "conclusion",
     ]
@@ -417,9 +429,30 @@ def test_prepared_presentation_schema_uses_only_supported_gemini_keywords() -> N
         "properties", "additionalProperties", "required", "$id", "$defs",
         "$ref", "$anchor", "propertyOrdering",
     }
-    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
+    schema = prepare_gemini_presentation_schema()
 
     assert _unsupported_schema_keywords(schema, supported) == []
+
+
+def test_strict_presentation_array_limits_remain_enforced() -> None:
+    title = TitleSlide(type="title", title="Naslov")
+    with pytest.raises(ValidationError):
+        PresentationPlan(title="Premalo", slides=[title, title])
+    with pytest.raises(ValidationError):
+        PresentationPlan(title="Previše", slides=[title] * 13)
+    with pytest.raises(ValidationError):
+        BulletsSlide(type="bullets", title="Tačke", bullets=["x"] * 7)
+    with pytest.raises(ValidationError):
+        ConclusionSlide(type="conclusion", title="Zaključak", bullets=["x"] * 6)
+    with pytest.raises(ValidationError):
+        KeyMetricsSlide(
+            type="key_metrics", title="Metrike",
+            metrics=[MetricCard(label="M", value="1")] * 5,
+        )
+    with pytest.raises(ValidationError):
+        TableSlide(type="table", title="Kolone", headers=["x"] * 6, rows=[["x"]])
+    with pytest.raises(ValidationError):
+        TableSlide(type="table", title="Redovi", headers=["x"], rows=[["x"]] * 9)
 
 
 def test_application_presentation_length_validation_remains_strict() -> None:
