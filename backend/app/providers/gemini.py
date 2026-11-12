@@ -25,7 +25,16 @@ from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceRe
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlan, TransformationPlanEnvelope
-from app.schemas.presentations import PresentationPlan, PresentationPlanEnvelope
+from app.schemas.presentations import (
+    BulletsSlide,
+    ConclusionSlide,
+    KeyMetricsSlide,
+    MetricCard,
+    PresentationPlan,
+    SectionSlide,
+    TableSlide,
+    TitleSlide,
+)
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
@@ -189,6 +198,55 @@ class GeminiDocumentPayload(BaseModel):
 
     answer: str
 
+
+class GeminiPresentationSlide(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["title", "bullets", "section", "key_metrics", "table", "conclusion"]
+    title: str
+    subtitle: str
+    bullets: list[str] = Field(max_length=6)
+    metrics: list[MetricCard] = Field(max_length=4)
+    headers: list[str] = Field(max_length=5)
+    rows: list[list[str]] = Field(max_length=8)
+
+
+class GeminiPresentationPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    subtitle: str
+    slides: list[GeminiPresentationSlide] = Field(min_length=3, max_length=12)
+
+
+class GeminiPresentationPlanEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan: GeminiPresentationPlan
+
+
+def convert_gemini_presentation_plan(payload: GeminiPresentationPlan) -> PresentationPlan:
+    slides = []
+    for item in payload.slides:
+        common = {"type": item.type, "title": item.title}
+        if item.type == "title":
+            slide = TitleSlide(**common, subtitle=item.subtitle or None)
+        elif item.type == "section":
+            slide = SectionSlide(**common, subtitle=item.subtitle or None)
+        elif item.type == "bullets":
+            slide = BulletsSlide(**common, bullets=item.bullets)
+        elif item.type == "key_metrics":
+            slide = KeyMetricsSlide(**common, metrics=item.metrics)
+        elif item.type == "table":
+            slide = TableSlide(**common, headers=item.headers, rows=item.rows)
+        else:
+            slide = ConclusionSlide(**common, bullets=item.bullets)
+        slides.append(slide)
+    return PresentationPlan(
+        title=payload.title,
+        subtitle=payload.subtitle or None,
+        slides=slides,
+    )
+
     @field_validator("answer", mode="before")
     @classmethod
     def _trim_answer(cls, value: Any) -> str:
@@ -328,7 +386,7 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             system_instruction=PRESENTATION_PLANNING_INSTRUCTION,
             response_mime_type="application/json",
-            response_json_schema=prepare_gemini_response_schema(PresentationPlanEnvelope.model_json_schema()),
+            response_json_schema=prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema()),
             temperature=self.settings.gemini_temperature,
             max_output_tokens=self.settings.gemini_max_output_tokens,
         )
@@ -349,11 +407,12 @@ class GeminiProvider:
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, BaseModel): parsed = parsed.model_dump()
         try:
-            envelope = PresentationPlanEnvelope.model_validate(parsed) if isinstance(parsed, dict) else PresentationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
+            envelope = GeminiPresentationPlanEnvelope.model_validate(parsed) if isinstance(parsed, dict) else GeminiPresentationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
+            plan = convert_gemini_presentation_plan(envelope.plan)
         except (ValidationError, ValueError, TypeError) as exc:
             self._log_provider_failure("invalid_presentation_plan", exc)
             raise AIPresentationPlanError("Gemini returned an invalid presentation plan.") from exc
-        return envelope.plan
+        return plan
 
     async def generate_chat_response(
         self,

@@ -18,8 +18,11 @@ from app.providers.exceptions import (
 )
 from app.providers.gemini import (
     GeminiChatPayload,
+    GeminiPresentationPlan,
+    GeminiPresentationPlanEnvelope,
     GeminiProvider,
     GeminiSourceChatPayload,
+    convert_gemini_presentation_plan,
     prepare_gemini_response_schema,
     sanitize_gemini_schema,
     validate_schema_required_properties,
@@ -28,7 +31,7 @@ from app.schemas.chat import ChatRequest
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import DocumentMetadata, ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlanEnvelope
-from app.schemas.presentations import PresentationPlanEnvelope
+from app.schemas.presentations import PresentationPlan, PresentationPlanEnvelope
 from app.services.hype_retrieval import HypeContext, HypeDocument
 from app.services.chat_service import ChatService
 from app.services.public_sources import PublicSourceContext, PublicSourceReader, SourceFailure
@@ -271,11 +274,20 @@ def test_malformed_xlsx_plan_is_rejected() -> None:
 
 
 def _presentation_payload() -> dict:
-    return {"plan": {"title": "Beta plan", "subtitle": None, "slides": [
-        {"type": "title", "title": "Beta plan", "subtitle": "Pregled"},
-        {"type": "bullets", "title": "Prioriteti", "bullets": ["Testiranje proizvoda"]},
-        {"type": "conclusion", "title": "Zaključak", "bullets": ["Nastaviti beta test"]},
+    return {"plan": {"title": "Beta plan", "subtitle": "", "slides": [
+        _flat_slide("title", "Beta plan", subtitle="Pregled"),
+        _flat_slide("bullets", "Prioriteti", bullets=["Testiranje proizvoda"]),
+        _flat_slide("conclusion", "Zaključak", bullets=["Nastaviti beta test"]),
     ]}}
+
+
+def _flat_slide(slide_type: str, heading: str, **overrides) -> dict:
+    slide = {
+        "type": slide_type, "title": heading, "subtitle": "", "bullets": [],
+        "metrics": [], "headers": [], "rows": [],
+    }
+    slide.update(overrides)
+    return slide
 
 
 def test_document_backed_presentation_plan_is_explicitly_grounded() -> None:
@@ -303,6 +315,69 @@ def test_prompt_only_presentation_is_distinguished_and_malformed_plan_rejected()
         asyncio.run(provider.generate_presentation_plan("Napravi prezentaciju", 6, None))
     assert "Prompt-only mode" in models.calls[0]["contents"]
     assert "No source document or live research" in models.calls[0]["contents"]
+
+
+def test_gemini_facing_presentation_schema_is_flat_without_union_keywords() -> None:
+    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
+    slide_schema = schema["properties"]["plan"]["properties"]["slides"]["items"]
+
+    assert _find_key(schema, "oneOf") == []
+    assert _find_key(schema, "anyOf") == []
+    assert _find_key(schema, "const") == []
+    assert _find_key(schema, "discriminator") == []
+    assert slide_schema["properties"]["type"]["enum"] == [
+        "title", "bullets", "section", "key_metrics", "table", "conclusion",
+    ]
+
+
+def test_all_flat_slide_types_convert_to_strict_presentation_plan() -> None:
+    payload = GeminiPresentationPlan.model_validate({
+        "title": "Kompletna prezentacija", "subtitle": "",
+        "slides": [
+            _flat_slide("title", "Naslov", subtitle="Podnaslov"),
+            _flat_slide("bullets", "Tačke", bullets=["Jedna tačka"]),
+            _flat_slide("section", "Sekcija", subtitle="Uvod"),
+            _flat_slide("key_metrics", "Metrike", metrics=[{"label": "Prihod", "value": "100"}]),
+            _flat_slide("table", "Tabela", headers=["A"], rows=[["1"]]),
+            _flat_slide("conclusion", "Zaključak", bullets=["Sledeći korak"]),
+        ],
+    })
+
+    strict = convert_gemini_presentation_plan(payload)
+
+    assert isinstance(strict, PresentationPlan)
+    assert [slide.type for slide in strict.slides] == [
+        "title", "bullets", "section", "key_metrics", "table", "conclusion",
+    ]
+
+
+@pytest.mark.parametrize(("slide_type", "overrides"), [
+    ("title", {"title": ""}),
+    ("bullets", {"bullets": []}),
+    ("section", {"title": ""}),
+    ("key_metrics", {"metrics": []}),
+    ("table", {"headers": [], "rows": []}),
+    ("conclusion", {"bullets": []}),
+])
+def test_flat_slide_missing_type_specific_content_is_rejected(slide_type, overrides) -> None:
+    target = _flat_slide(slide_type, "Sadržaj", **overrides)
+    payload = GeminiPresentationPlan.model_validate({
+        "title": "Test", "subtitle": "", "slides": [
+            target,
+            _flat_slide("section", "Sekcija"),
+            _flat_slide("conclusion", "Zaključak", bullets=["Kraj"]),
+        ],
+    })
+
+    with pytest.raises(ValidationError):
+        convert_gemini_presentation_plan(payload)
+
+
+def test_flat_presentation_rejects_unsupported_slide_type() -> None:
+    payload = _presentation_payload()
+    payload["plan"]["slides"][0]["type"] = "chart"
+    with pytest.raises(ValidationError):
+        GeminiPresentationPlanEnvelope.model_validate(payload)
 
 
 def test_raw_presentation_schema_exposes_gemini_incompatible_union_keywords() -> None:
@@ -342,7 +417,7 @@ def test_prepared_presentation_schema_uses_only_supported_gemini_keywords() -> N
         "properties", "additionalProperties", "required", "$id", "$defs",
         "$ref", "$anchor", "propertyOrdering",
     }
-    schema = prepare_gemini_response_schema(PresentationPlanEnvelope.model_json_schema())
+    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
 
     assert _unsupported_schema_keywords(schema, supported) == []
 
