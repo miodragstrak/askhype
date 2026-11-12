@@ -257,6 +257,7 @@ def convert_gemini_presentation_plan(payload: GeminiPresentationPlan) -> Present
 
 class GeminiProvider:
     provider_name = "gemini"
+    _availability_retry_delays = (0.5, 1.0)
 
     def __init__(
         self,
@@ -290,12 +291,7 @@ class GeminiProvider:
             max_output_tokens=self.settings.gemini_max_output_tokens,
         )
         try:
-            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
-                response = await self._client.aio.models.generate_content(
-                    model=self.model,
-                    contents=context,
-                    config=config,
-                )
+            response = await self._generate_content(contents=context, config=config)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -345,10 +341,7 @@ class GeminiProvider:
             max_output_tokens=min(self.settings.gemini_max_output_tokens, 2048),
         )
         try:
-            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
-                response = await self._client.aio.models.generate_content(
-                    model=self.model, contents=context, config=config
-                )
+            response = await self._generate_content(contents=context, config=config)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -391,8 +384,7 @@ class GeminiProvider:
             max_output_tokens=self.settings.gemini_max_output_tokens,
         )
         try:
-            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
-                response = await self._client.aio.models.generate_content(model=self.model, contents=context, config=config)
+            response = await self._generate_content(contents=context, config=config)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -436,12 +428,7 @@ class GeminiProvider:
             if images:
                 contents = [types.Part.from_text(text=user_context)]
                 contents.extend(types.Part.from_bytes(data=image.data, mime_type=image.content_type) for image in images)
-            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
-                response = await self._client.aio.models.generate_content(
-                    model=self.model,
-                    contents=contents,
-                    config=config,
-                )
+            response = await self._generate_content(contents=contents, config=config)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -534,6 +521,39 @@ class GeminiProvider:
             if part is not None
         ).casefold()
         return "invalid_argument" in text or "schema" in text
+
+    def _is_transient_unavailable_error(self, exc: Exception) -> bool:
+        status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+        status = str(getattr(exc, "status", "")).casefold()
+        return status_code == 503 or status == "unavailable"
+
+    async def _generate_content(self, *, contents: Any, config: types.GenerateContentConfig) -> Any:
+        async with asyncio.timeout(self.settings.gemini_timeout_seconds):
+            for attempt in range(1, len(self._availability_retry_delays) + 2):
+                try:
+                    return await self._client.aio.models.generate_content(
+                        model=self.model,
+                        contents=contents,
+                        config=config,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if (
+                        not self._is_transient_unavailable_error(exc)
+                        or attempt > len(self._availability_retry_delays)
+                    ):
+                        raise
+                    logger.warning(
+                        "AI provider retry: %s",
+                        {
+                            "provider": self.provider_name,
+                            "attempt": attempt,
+                            "failure_category": "unavailable",
+                        },
+                    )
+                    await asyncio.sleep(self._availability_retry_delays[attempt - 1])
+        raise RuntimeError("Gemini retry loop ended unexpectedly.")
 
     def _parse_payload(self, response: Any, payload_type: type[GeminiChatPayload] = GeminiChatPayload) -> GeminiChatPayload:
         parsed = getattr(response, "parsed", None)

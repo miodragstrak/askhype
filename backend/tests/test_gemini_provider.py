@@ -79,6 +79,32 @@ class FakeSdkError(Exception):
         self.status = "INVALID_ARGUMENT"
 
 
+class FakeUnavailableError(Exception):
+    status_code = 503
+    status = "UNAVAILABLE"
+
+
+class SequencedModels:
+    def __init__(self, outcomes: list[Any]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate_content(self, **kwargs: Any) -> FakeResponse:
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture
+def no_retry_sleep(monkeypatch):
+    async def immediate_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", immediate_sleep)
+
+
 def test_successful_structured_response_becomes_chat_response() -> None:
     models = FakeModels(FakeResponse(text=json.dumps(_valid_payload())))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
@@ -745,6 +771,65 @@ def test_gemini_invalid_argument_schema_error_is_not_unavailable() -> None:
 
     assert not isinstance(exc_info.value, AIProviderUnavailableError)
     assert "title" not in str(exc_info.value)
+    assert len(models.calls) == 1
+
+
+def test_transient_unavailable_retries_once_then_succeeds(no_retry_sleep) -> None:
+    models = SequencedModels([
+        FakeUnavailableError(),
+        FakeResponse(text=json.dumps(_valid_payload())),
+    ])
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert response.summary
+    assert len(models.calls) == 2
+
+
+def test_two_transient_unavailable_failures_then_success(no_retry_sleep) -> None:
+    models = SequencedModels([
+        FakeUnavailableError(), FakeUnavailableError(),
+        FakeResponse(text=json.dumps(_valid_payload())),
+    ])
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert response.summary
+    assert len(models.calls) == 3
+
+
+def test_all_transient_unavailable_attempts_propagate(no_retry_sleep) -> None:
+    models = SequencedModels([
+        FakeUnavailableError(), FakeUnavailableError(), FakeUnavailableError(),
+    ])
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    with pytest.raises(AIProviderUnavailableError):
+        asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert len(models.calls) == 3
+
+
+def test_invalid_response_is_not_retried() -> None:
+    models = SequencedModels([FakeResponse(text="{not json")])
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    with pytest.raises(AIProviderResponseError):
+        asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert len(models.calls) == 1
+
+
+def test_cancellation_is_not_retried() -> None:
+    models = SequencedModels([asyncio.CancelledError()])
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert len(models.calls) == 1
 
 
 def test_timeout_is_mapped_to_provider_timeout() -> None:
