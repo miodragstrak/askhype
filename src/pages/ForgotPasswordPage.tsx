@@ -6,6 +6,16 @@ import { supabase } from '../utils/supabase';
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+const isRecoveryRateLimitError = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const authError = error as { status?: unknown; code?: unknown };
+  return (
+    authError.status === 429 ||
+    authError.code === 'over_request_rate_limit' ||
+    authError.code === 'over_email_send_rate_limit'
+  );
+};
+
 export const ForgotPasswordPage = () => {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -28,8 +38,12 @@ export const ForgotPasswordPage = () => {
       });
       if (resetError) throw resetError;
       setSuccess(true);
-    } catch {
-      setError('Slanje linka trenutno nije uspelo. Pokušaj ponovo kasnije.');
+    } catch (resetError) {
+      setError(
+        isRecoveryRateLimitError(resetError)
+          ? 'Previše zahteva za slanje emaila. Pokušajte ponovo malo kasnije.'
+          : 'Slanje linka trenutno nije uspelo. Pokušaj ponovo kasnije.',
+      );
     } finally {
       setIsSubmitting(false);
     }
