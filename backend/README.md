@@ -573,6 +573,18 @@ uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
 
 The container runs as the non-root `askhype` user and includes a standard-library Docker healthcheck for `GET /api/health`. The same endpoint is available to an external orchestrator at `http://<host>:<port>/api/health`.
 
+## XLSX transformations
+
+`POST /api/documents/transform-xlsx` accepts one validated `.xlsx` file and a
+required `instruction` multipart field. Gemini produces one strictly typed,
+allowlisted plan; openpyxl applies the operation deterministically in memory.
+The response is a new `originalname_transformed.xlsx` attachment. Supported
+operations are add/update column, one-condition filtering, one-column sorting,
+column rename, and one grouped sum/average/count summary sheet. Arbitrary
+formulas, code, macros, `.xls`/`.xlsm`, pivots and charts are not supported.
+Downloads are ephemeral: the browser stores only the filename and textual
+summary in conversation history, so a reload requires repeating the operation.
+
 ## Limitations
 
 - Supabase schema and RPC behavior still require staging verification

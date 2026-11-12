@@ -3,6 +3,7 @@ from typing import Protocol
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
+from app.schemas.xlsx_transform import TransformationPlan
 from app.services.hype_retrieval import HypeContext
 from app.services.public_sources import PublicSourceContext
 
@@ -26,3 +27,8 @@ class AIProvider(Protocol):
         document: ExtractedDocument,
     ) -> str:
         """Answer a question using only extracted uploaded-document content."""
+
+    async def generate_xlsx_transformation_plan(
+        self, instruction: str, document: ExtractedDocument
+    ) -> TransformationPlan:
+        """Convert a user instruction into one allowlisted XLSX operation."""

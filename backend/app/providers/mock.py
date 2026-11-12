@@ -4,6 +4,7 @@ from uuid import NAMESPACE_URL, uuid5
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
+from app.schemas.xlsx_transform import TransformationPlan, UnsupportedPlan
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
 from app.services.public_sources import PublicSourceContext, select_excerpts
@@ -21,6 +22,14 @@ class MockAIProvider:
         return (
             f"Mock analiza dokumenta {document.filename} za pitanje: {prompt}\n\n"
             f"Izdvojeni sadržaj:\n{document.text[:2_000]}"
+        )
+
+    async def generate_xlsx_transformation_plan(
+        self, instruction: str, document: ExtractedDocument
+    ) -> TransformationPlan:
+        return UnsupportedPlan(
+            operation="unsupported",
+            reason="Mock provider does not infer spreadsheet transformations.",
         )
 
     async def generate_chat_response(

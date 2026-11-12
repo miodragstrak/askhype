@@ -39,7 +39,13 @@ export const loadConversations = (): LocalConversation[] => {
 
 export const saveConversations = (conversations: LocalConversation[]) => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sortConversations(conversations)));
+    const safe = sortConversations(conversations).map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.map((message) => message.role === 'assistant' && message.response.download
+        ? { ...message, response: { ...message.response, download: { filename: message.response.download.filename, available: false } } }
+        : message),
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
   } catch {
     // The active conversation remains usable when storage is unavailable.
   }

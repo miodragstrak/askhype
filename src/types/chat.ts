@@ -12,6 +12,14 @@ export interface PendingDocument {
   file: File;
 }
 
+export type DocumentAction = 'analyze' | 'transform';
+
+export interface TransformationDownload {
+  filename: string;
+  url?: string;
+  available: boolean;
+}
+
 export interface DocumentMetadata {
   page_count: number | null;
   sheet_names: string[];
@@ -48,6 +56,7 @@ export interface ChatResponse {
   follow_up_actions: string[];
   sources: SourceReference[];
   generated_at: string;
+  download?: TransformationDownload;
 }
 
 export interface ChatRecommendation {

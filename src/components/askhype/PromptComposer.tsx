@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, FileText, ImagePlus, X } from 'lucide-react';
-import type { PendingDocument, PendingImage } from '../../types/chat';
+import type { DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 
 interface PromptComposerProps {
-  onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null) => Promise<boolean>;
+  onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null, action: DocumentAction) => Promise<boolean>;
   disabled?: boolean;
   autoFocus?: boolean;
 }
@@ -12,6 +12,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const [value, setValue] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
   const [document, setDocument] = useState<PendingDocument | null>(null);
+  const [documentAction, setDocumentAction] = useState<DocumentAction>('analyze');
   const [validationError, setValidationError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -27,11 +28,12 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const submit = async () => {
     const prompt = value.trim();
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
-    if (await onSubmit(prompt, images, document)) {
+    if (await onSubmit(prompt, images, document, documentAction)) {
       setValue('');
       images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
       setImages([]);
       setDocument(null);
+      setDocumentAction('analyze');
       setValidationError(null);
     }
   };
@@ -62,6 +64,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
     setImages([]);
     setDocument({ file });
+    setDocumentAction('analyze');
     setValidationError(null);
   };
 
@@ -75,6 +78,12 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
             <p className="truncate text-sm font-medium text-chat-text">{document.file.name}</p>
             <p className="text-[11px] uppercase text-chat-muted">{document.file.name.split('.').pop()} · dokument</p>
           </div>
+          {document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
+            <div className="flex rounded-lg border border-chat-border p-0.5 text-[11px]">
+              <button type="button" onClick={() => setDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
+              <button type="button" onClick={() => setDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
+            </div>
+          )}
           <button type="button" onClick={() => setDocument(null)} aria-label="Ukloni dokument" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover hover:text-chat-text"><X size={16} /></button>
         </div>
       )}
@@ -98,7 +107,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           autoFocus={autoFocus}
           disabled={disabled}
           aria-label="Poruka za AskHype"
-          placeholder={document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
+          placeholder={documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
           className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button

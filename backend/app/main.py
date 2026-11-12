@@ -24,6 +24,10 @@ app.add_middleware(
         "X-AskHype-Usage-Used",
         "X-AskHype-Usage-Limit",
         "X-AskHype-Usage-Remaining",
+        "X-AskHype-Output-Filename",
+        "X-AskHype-Transformation-Operation",
+        "X-AskHype-Transformation-Summary",
+        "X-AskHype-Transformation-Warnings",
     ],
 )
 

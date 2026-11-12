@@ -83,6 +83,15 @@ def extract_document(
         raise DocumentValidationError("Dokument nije moguće pročitati ili je oštećen.") from exc
 
 
+def validate_xlsx_upload(body: bytes, filename: str | None, declared_mime: str | None) -> str:
+    """Validate an XLSX upload without persisting or transforming it."""
+    safe_name, file_type = _validate_upload(body, filename, declared_mime)
+    if file_type != "xlsx":
+        raise DocumentValidationError("Za Excel izmenu je podržan samo XLSX dokument.")
+    _validate_office_archive(body, "xl/workbook.xml")
+    return safe_name
+
+
 def _validate_upload(
     body: bytes,
     filename: str | None,

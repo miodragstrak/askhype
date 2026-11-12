@@ -16,3 +16,7 @@ class AIProviderResponseError(AIProviderError):
 
 class AIProviderUnavailableError(AIProviderError):
     pass
+
+
+class AITransformationPlanError(AIProviderResponseError):
+    """The provider did not produce a safe, supported transformation plan."""

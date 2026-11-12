@@ -1,4 +1,4 @@
-import { ExternalLink, FileText, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
+import { Download, ExternalLink, FileText, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
 import type { QuotaLimitPayload } from '../../services/chat-api';
 import type { ChatResponse } from '../../types/chat';
 import type { LocalMessage } from '../../types/conversation';
@@ -39,6 +39,14 @@ const AssistantResponse = ({
 }) => (
   <div className="space-y-5 lg:space-y-6">
     <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>
+
+    {response.download && (response.download.url ? (
+      <a href={response.download.url} download={response.download.filename} className="inline-flex items-center gap-2 rounded-full bg-hype-blue px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-hype-yellow">
+        <Download size={16} /> Preuzmi Excel
+      </a>
+    ) : (
+      <p className="text-xs text-chat-muted">Preuzimanje više nije dostupno nakon ponovnog učitavanja. Ponovi izmenu za novi fajl.</p>
+    ))}
 
     {response.recommendations.length > 0 && (
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-1 lg:grid-cols-2 lg:gap-4">

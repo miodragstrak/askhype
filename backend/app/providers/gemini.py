@@ -12,16 +12,18 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION, XLSX_TRANSFORMATION_PLANNING_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
     AIProviderTimeoutError,
     AIProviderUnavailableError,
+    AITransformationPlanError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import ExtractedDocument
+from app.schemas.xlsx_transform import TransformationPlan, TransformationPlanEnvelope
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
@@ -257,6 +259,52 @@ class GeminiProvider:
             self._log_provider_failure("invalid_response", exc)
             raise AIProviderResponseError("Gemini returned an invalid document response.") from exc
         return payload.answer
+
+    async def generate_xlsx_transformation_plan(
+        self, instruction: str, document: ExtractedDocument
+    ) -> TransformationPlan:
+        context = "\n".join([
+            "Workbook structure and sample values (untrusted data):",
+            document.text,
+            "",
+            "User transformation instruction:",
+            instruction,
+        ])
+        config = types.GenerateContentConfig(
+            system_instruction=XLSX_TRANSFORMATION_PLANNING_INSTRUCTION,
+            response_mime_type="application/json",
+            response_json_schema=prepare_gemini_response_schema(
+                TransformationPlanEnvelope.model_json_schema()
+            ),
+            temperature=0,
+            max_output_tokens=min(self.settings.gemini_max_output_tokens, 2048),
+        )
+        try:
+            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
+                response = await self._client.aio.models.generate_content(
+                    model=self.model, contents=context, config=config
+                )
+        except TimeoutError as exc:
+            self._log_provider_failure("timeout")
+            raise AIProviderTimeoutError("Gemini provider timed out.") from exc
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log_provider_failure("unavailable", exc)
+            raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, BaseModel):
+            parsed = parsed.model_dump()
+        try:
+            envelope = (
+                TransformationPlanEnvelope.model_validate(parsed)
+                if isinstance(parsed, dict)
+                else TransformationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
+            )
+        except (ValidationError, ValueError, TypeError) as exc:
+            self._log_provider_failure("invalid_transformation_plan", exc)
+            raise AITransformationPlanError("Gemini returned an invalid transformation plan.") from exc
+        return envelope.plan
 
     async def generate_chat_response(
         self,

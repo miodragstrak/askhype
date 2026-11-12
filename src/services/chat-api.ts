@@ -36,6 +36,15 @@ export interface DocumentApiResult {
   usage: UsageSnapshot | null;
 }
 
+export interface XlsxTransformationApiResult {
+  blob: Blob;
+  filename: string;
+  operation: string;
+  summary: string;
+  warnings: string[];
+  usage: UsageSnapshot | null;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -215,6 +224,51 @@ export const sendDocumentAnalysis = async (
   }
 
   return { data: await response.json(), usage: readUsageHeaders(response) };
+};
+
+const decodedHeader = (response: Response, name: string, fallback: string): string => {
+  const value = response.headers.get(name);
+  if (!value) return fallback;
+  try { return decodeURIComponent(value); } catch { return fallback; }
+};
+
+export const sendXlsxTransformation = async (
+  file: File,
+  instruction: string,
+  options: ApiRequestOptions = {},
+): Promise<XlsxTransformationApiResult> => {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('instruction', instruction);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/documents/transform-xlsx`, {
+      method: 'POST', headers: authHeaders(options.accessToken), body, signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Zahtev je otkazan.');
+    throw new ApiError('Excel dokument trenutno nije moguće izmeniti. Pokušaj ponovo.', 0);
+  }
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    if (response.status === 429 && isQuotaLimitPayload(payload?.detail)) throw new PromptLimitError(payload.detail);
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+  const warningHeader = decodedHeader(response, 'X-AskHype-Transformation-Warnings', '[]');
+  let warnings: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(warningHeader);
+    if (Array.isArray(parsed)) warnings = parsed.filter((item): item is string => typeof item === 'string');
+  } catch { warnings = []; }
+  return {
+    blob: await response.blob(),
+    filename: decodedHeader(response, 'X-AskHype-Output-Filename', 'workbook_transformed.xlsx'),
+    operation: response.headers.get('X-AskHype-Transformation-Operation') || 'transformation',
+    summary: decodedHeader(response, 'X-AskHype-Transformation-Summary', 'Excel dokument je uspešno izmenjen.'),
+    warnings,
+    usage: readUsageHeaders(response),
+  };
 };
 
 export const getUsage = async (options: ApiRequestOptions = {}): Promise<UsageSnapshot> => {
