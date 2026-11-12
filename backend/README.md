@@ -335,6 +335,7 @@ Supported environment variables:
 - `AI_PROVIDER`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
+- `GEMINI_FALLBACK_MODEL` (optional; one request after primary 503 retries are exhausted)
 - `GEMINI_TIMEOUT_SECONDS`
 - `GEMINI_TEMPERATURE`
 - `GEMINI_MAX_OUTPUT_TOKENS`

@@ -43,6 +43,7 @@ def test_development_and_staging_do_not_require_production_secrets() -> None:
     )
 
     assert development.ai_provider == "mock"
+    assert development.gemini_fallback_model is None
     assert development.allowed_frontend_origins == ["http://localhost:5173"]
     assert development.anonymous_prompt_limit == 5
     assert staging.allowed_frontend_origins == ["https://staging.askhype.example"]

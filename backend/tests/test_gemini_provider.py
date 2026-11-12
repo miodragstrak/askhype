@@ -764,7 +764,10 @@ def test_gemini_invalid_argument_schema_error_is_not_unavailable() -> None:
             status_code=400,
         )
     )
-    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
 
     with pytest.raises(AIProviderResponseError) as exc_info:
         asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
@@ -785,6 +788,19 @@ def test_transient_unavailable_retries_once_then_succeeds(no_retry_sleep) -> Non
 
     assert response.summary
     assert len(models.calls) == 2
+
+
+def test_primary_success_never_calls_configured_fallback() -> None:
+    models = SequencedModels([FakeResponse(text=json.dumps(_valid_payload()))])
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
+
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert response.summary
+    assert [call["model"] for call in models.calls] == ["gemini-test-model"]
 
 
 def test_two_transient_unavailable_failures_then_success(no_retry_sleep) -> None:
@@ -812,9 +828,50 @@ def test_all_transient_unavailable_attempts_propagate(no_retry_sleep) -> None:
     assert len(models.calls) == 3
 
 
+def test_primary_exhaustion_uses_fallback_once_and_succeeds(no_retry_sleep) -> None:
+    models = SequencedModels([
+        FakeUnavailableError(), FakeUnavailableError(), FakeUnavailableError(),
+        FakeResponse(text=json.dumps(_valid_payload())),
+    ])
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
+
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert response.summary
+    assert [call["model"] for call in models.calls] == [
+        "gemini-test-model", "gemini-test-model", "gemini-test-model",
+        "gemini-fallback-model",
+    ]
+    assert models.calls[2]["contents"] is models.calls[3]["contents"]
+    assert models.calls[2]["config"] is models.calls[3]["config"]
+
+
+def test_primary_and_single_fallback_unavailable_propagates(no_retry_sleep) -> None:
+    models = SequencedModels([
+        FakeUnavailableError(), FakeUnavailableError(), FakeUnavailableError(),
+        FakeUnavailableError(),
+    ])
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
+
+    with pytest.raises(AIProviderUnavailableError):
+        asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
+
+    assert len(models.calls) == 4
+    assert models.calls[-1]["model"] == "gemini-fallback-model"
+
+
 def test_invalid_response_is_not_retried() -> None:
     models = SequencedModels([FakeResponse(text="{not json")])
-    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
 
     with pytest.raises(AIProviderResponseError):
         asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
@@ -824,7 +881,10 @@ def test_invalid_response_is_not_retried() -> None:
 
 def test_cancellation_is_not_retried() -> None:
     models = SequencedModels([asyncio.CancelledError()])
-    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+    provider = GeminiProvider(
+        app_settings=_settings(fallback_model="gemini-fallback-model"),
+        client=FakeClient(models),
+    )
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(provider.generate_chat_response(ChatRequest(message="Plan")))
@@ -925,12 +985,16 @@ def _unsupported_schema_keywords(
     return unsupported
 
 
-def _settings(api_key: str = "test-secret-key") -> Settings:
+def _settings(
+    api_key: str = "test-secret-key",
+    fallback_model: str | None = None,
+) -> Settings:
     return Settings(
         _env_file=None,
         ai_provider="gemini",
         gemini_api_key=api_key,
         gemini_model="gemini-test-model",
+        gemini_fallback_model=fallback_model,
         gemini_timeout_seconds=45,
         gemini_temperature=0.3,
         gemini_max_output_tokens=1024,

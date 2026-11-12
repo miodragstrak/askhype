@@ -266,6 +266,8 @@ class GeminiProvider:
     ) -> None:
         self.settings = app_settings
         self.model = app_settings.gemini_model
+        configured_fallback = (app_settings.gemini_fallback_model or "").strip()
+        self.fallback_model = configured_fallback if configured_fallback and configured_fallback != self.model else None
         self._client = client or self._build_client(app_settings)
 
     async def generate_document_answer(self, prompt: str, document: ExtractedDocument) -> str:
@@ -539,11 +541,50 @@ class GeminiProvider:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    if (
-                        not self._is_transient_unavailable_error(exc)
-                        or attempt > len(self._availability_retry_delays)
-                    ):
+                    if not self._is_transient_unavailable_error(exc):
                         raise
+                    if attempt > len(self._availability_retry_delays):
+                        if not self.fallback_model:
+                            raise
+                        logger.warning(
+                            "AI primary model unavailable after retries: %s",
+                            {
+                                "provider": self.provider_name,
+                                "failure_category": "unavailable",
+                            },
+                        )
+                        logger.warning(
+                            "AI fallback model selected: %s",
+                            {
+                                "provider": self.provider_name,
+                                "fallback_model": self.fallback_model,
+                            },
+                        )
+                        try:
+                            response = await self._client.aio.models.generate_content(
+                                model=self.fallback_model,
+                                contents=contents,
+                                config=config,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as fallback_exc:
+                            logger.warning(
+                                "AI fallback model failed: %s",
+                                {
+                                    "provider": self.provider_name,
+                                    "failure_category": self._fallback_failure_category(fallback_exc),
+                                },
+                            )
+                            raise
+                        logger.info(
+                            "AI fallback model succeeded: %s",
+                            {
+                                "provider": self.provider_name,
+                                "failure_category": "none",
+                            },
+                        )
+                        return response
                     logger.warning(
                         "AI provider retry: %s",
                         {
@@ -554,6 +595,13 @@ class GeminiProvider:
                     )
                     await asyncio.sleep(self._availability_retry_delays[attempt - 1])
         raise RuntimeError("Gemini retry loop ended unexpectedly.")
+
+    def _fallback_failure_category(self, exc: Exception) -> str:
+        if self._is_transient_unavailable_error(exc):
+            return "unavailable"
+        if self._is_invalid_request_schema_error(exc):
+            return "invalid_request"
+        return "provider_error"
 
     def _parse_payload(self, response: Any, payload_type: type[GeminiChatPayload] = GeminiChatPayload) -> GeminiChatPayload:
         parsed = getattr(response, "parsed", None)
