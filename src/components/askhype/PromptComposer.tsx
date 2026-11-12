@@ -27,6 +27,16 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   const submit = async () => {
     const prompt = value.trim();
+    if (documentAction === 'transform') {
+      if (!document) {
+        setValidationError('Dokument je obavezan za Excel izmenu.');
+        return;
+      }
+      if (!document.file.name.toLocaleLowerCase().endsWith('.xlsx')) {
+        setValidationError('Za ovu opciju potreban je XLSX fajl.');
+        return;
+      }
+    }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
     if (await onSubmit(prompt, images, document, documentAction)) {
       setValue('');
@@ -64,7 +74,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
     setImages([]);
     setDocument({ file });
-    setDocumentAction('analyze');
+    if (documentAction !== 'transform') setDocumentAction('analyze');
     setValidationError(null);
   };
 
