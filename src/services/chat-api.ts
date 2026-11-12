@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import type { ChatRequest, ChatResponse, PendingImage } from '../types/chat';
+import type { ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage } from '../types/chat';
 import { getAnonymousId } from '../utils/anonymous-id';
 
 interface BackendValidationError {
@@ -28,6 +28,11 @@ export interface ApiRequestOptions {
 
 export interface ChatApiResult {
   data: ChatResponse;
+  usage: UsageSnapshot | null;
+}
+
+export interface DocumentApiResult {
+  data: DocumentAnalysisResponse;
   usage: UsageSnapshot | null;
 }
 
@@ -170,6 +175,46 @@ export const sendChatMessage = async (
     data: await response.json(),
     usage: readUsageHeaders(response),
   };
+};
+
+export const sendDocumentAnalysis = async (
+  file: File,
+  prompt: string,
+  options: ApiRequestOptions = {},
+): Promise<DocumentApiResult> => {
+  const body = new FormData();
+  body.append('file', file);
+  body.append('prompt', prompt);
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/documents/analyze`, {
+      method: 'POST',
+      headers: authHeaders(options.accessToken),
+      body,
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Zahtev je otkazan.');
+    }
+    throw new ApiError('Dokument trenutno nije moguće analizirati. Pokušaj ponovo.', 0);
+  }
+
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (response.status === 429 && isQuotaLimitPayload(payload?.detail)) {
+      throw new PromptLimitError(payload.detail);
+    }
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+
+  return { data: await response.json(), usage: readUsageHeaders(response) };
 };
 
 export const getUsage = async (options: ApiRequestOptions = {}): Promise<UsageSnapshot> => {

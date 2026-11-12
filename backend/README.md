@@ -8,6 +8,46 @@ This backend currently provides the application shell, environment-based configu
 
 The chat endpoint runs in mock provider mode by default. It can also run against Gemini when configured with `AI_PROVIDER=gemini` and a local `GEMINI_API_KEY`.
 
+## Document analysis foundation
+
+`POST /api/documents/analyze` accepts one transient document and one question as
+`multipart/form-data` fields named `file` and `prompt`. It uses the same identity
+headers and rolling prompt quota as `/api/chat`; one completed analysis counts as
+one prompt. Uploaded bytes are parsed in memory, are not logged or persisted, and
+are not written to public/static directories.
+
+Supported formats and parsers:
+
+- PDF (`pypdf`): text-based PDFs, up to 100 pages. Encrypted and image-only PDFs
+  are rejected; OCR is not available.
+- DOCX (`python-docx`): paragraphs, headings and basic table rows.
+- XLSX (`openpyxl`, read-only): up to 5 sheets, 200 rows and 50 columns per sheet.
+- CSV (Python standard library): UTF-8/UTF-8-BOM and common comma, semicolon, tab
+  or pipe delimiters; up to 1,000 rows and 50 columns.
+
+The upload limit is 15 MiB, Office archives may expand to at most 100 MiB, and
+at most 80,000 extracted characters are supplied for analysis. Safe truncation
+is reported in the response `warnings`; metadata includes pages, selected sheet
+names, processed row/column counts, character count and truncation state. File
+extension, declared MIME type and format signatures/Office structure are checked.
+Macros, scripts and formulas are never executed, and links embedded in documents
+are never fetched.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/api/documents/analyze \
+  -H "X-Anonymous-ID: 11111111-1111-4111-8111-111111111111" \
+  -F "file=@report.pdf;type=application/pdf" \
+  -F "prompt=Koji su glavni zaključci?"
+```
+
+Response fields are `filename`, `file_type`, `answer`, `extracted_metadata`,
+`warnings`, and timezone-aware `generated_at`. Filenames are reduced to safe
+basenames and internal paths are never returned. This P0 endpoint does not offer
+OCR, editing/export, multi-file analysis, persistent libraries, sharing, cloud
+storage, or automatic follow-up analysis without uploading the document again.
+
 ## Explicit public source reading
 
 Generic chat reads explicit HTTP(S) URLs in the **current message** through

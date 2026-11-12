@@ -3,6 +3,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
+from app.schemas.documents import ExtractedDocument
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
 from app.services.public_sources import PublicSourceContext, select_excerpts
@@ -15,6 +16,12 @@ MOCK_LAST_VERIFIED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 
 class MockAIProvider:
     provider_name = "mock"
+
+    async def generate_document_answer(self, prompt: str, document: ExtractedDocument) -> str:
+        return (
+            f"Mock analiza dokumenta {document.filename} za pitanje: {prompt}\n\n"
+            f"Izdvojeni sadržaj:\n{document.text[:2_000]}"
+        )
 
     async def generate_chat_response(
         self,

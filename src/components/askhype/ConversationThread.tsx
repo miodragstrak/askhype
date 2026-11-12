@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
+import { ExternalLink, FileText, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
 import type { QuotaLimitPayload } from '../../services/chat-api';
 import type { ChatResponse } from '../../types/chat';
 import type { LocalMessage } from '../../types/conversation';
@@ -185,6 +185,13 @@ export const ConversationThread = ({
         <div key={message.id} className="flex justify-end">
           <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--app-user-message)] px-4 py-3 text-[15px] leading-6 text-white sm:max-w-[75%]">
             {message.imagePreviews?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.imagePreviews.map((url, index) => <img key={url} src={url} alt={`Priložena slika ${index + 1}`} className="max-h-40 max-w-40 rounded-lg object-contain" />)}</div> : null}
+            {message.documentName ? (
+              <div className="mb-2 flex max-w-full items-center gap-2 rounded-lg bg-black/15 px-3 py-2 text-xs">
+                <FileText size={15} className="flex-none" />
+                <span className="truncate">{message.documentName}</span>
+                <span className="flex-none uppercase opacity-75">{message.documentType}</span>
+              </div>
+            ) : null}
             <p className="whitespace-pre-wrap break-words">{message.text}</p>
           </div>
         </div>

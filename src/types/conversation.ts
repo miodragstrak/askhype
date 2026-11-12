@@ -7,6 +7,9 @@ export type LocalMessage =
       text: string;
       // Object URLs are page-lifetime previews only; image bytes are never persisted or resent.
       imagePreviews?: string[];
+      // Display metadata only; uploaded document bytes are never persisted.
+      documentName?: string;
+      documentType?: string;
       createdAt: string;
     }
   | {

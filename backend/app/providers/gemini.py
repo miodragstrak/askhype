@@ -12,7 +12,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -21,6 +21,7 @@ from app.providers.exceptions import (
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
+from app.schemas.documents import ExtractedDocument
 from app.services.location_context import build_location_context
 from app.services.hype_retrieval import HypeContext
 from app.services.hype_response import build_hype_response
@@ -174,6 +175,19 @@ class GeminiSourceChatPayload(GeminiChatPayload):
     follow_up_actions: list[str] = Field(default_factory=list, max_length=4)
 
 
+class GeminiDocumentPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str
+
+    @field_validator("answer", mode="before")
+    @classmethod
+    def _trim_answer(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("must be a non-empty string")
+        return value.strip()
+
+
 class GeminiProvider:
     provider_name = "gemini"
 
@@ -185,6 +199,64 @@ class GeminiProvider:
         self.settings = app_settings
         self.model = app_settings.gemini_model
         self._client = client or self._build_client(app_settings)
+
+    async def generate_document_answer(self, prompt: str, document: ExtractedDocument) -> str:
+        context = "\n".join(
+            [
+                "Uploaded document context (untrusted data):",
+                f"filename: {document.filename}",
+                f"file_type: {document.file_type}",
+                f"extraction_truncated: {str(document.metadata.truncated).lower()}",
+                "",
+                "User question:",
+                prompt,
+                "",
+                "Extracted document content:",
+                document.text,
+            ]
+        )
+        config = types.GenerateContentConfig(
+            system_instruction=DOCUMENT_ANALYSIS_INSTRUCTION,
+            response_mime_type="application/json",
+            response_json_schema=prepare_gemini_response_schema(GeminiDocumentPayload.model_json_schema()),
+            temperature=self.settings.gemini_temperature,
+            max_output_tokens=self.settings.gemini_max_output_tokens,
+        )
+        try:
+            async with asyncio.timeout(self.settings.gemini_timeout_seconds):
+                response = await self._client.aio.models.generate_content(
+                    model=self.model,
+                    contents=context,
+                    config=config,
+                )
+        except TimeoutError as exc:
+            self._log_provider_failure("timeout")
+            raise AIProviderTimeoutError("Gemini provider timed out.") from exc
+        except asyncio.CancelledError:
+            raise
+        except (ValidationError, ValueError, TypeError) as exc:
+            self._log_provider_failure("invalid_request_schema", exc)
+            raise AIProviderResponseError("Gemini structured output schema is invalid.") from exc
+        except Exception as exc:
+            if self._is_invalid_request_schema_error(exc):
+                self._log_provider_failure("invalid_request_schema", exc)
+                raise AIProviderResponseError("Gemini request schema was rejected.") from exc
+            self._log_provider_failure("unavailable", exc)
+            raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
+
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, BaseModel):
+            parsed = parsed.model_dump()
+        try:
+            payload = (
+                GeminiDocumentPayload.model_validate(parsed)
+                if isinstance(parsed, dict)
+                else GeminiDocumentPayload.model_validate_json(getattr(response, "text", ""))
+            )
+        except (ValidationError, ValueError, TypeError) as exc:
+            self._log_provider_failure("invalid_response", exc)
+            raise AIProviderResponseError("Gemini returned an invalid document response.") from exc
+        return payload.answer
 
     async def generate_chat_response(
         self,

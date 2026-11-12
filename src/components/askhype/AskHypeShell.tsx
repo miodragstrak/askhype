@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, sendChatMessage, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, sendChatMessage, sendDocumentAnalysis, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
-import type { PendingImage } from '../../types/chat';
+import type { ChatResponse, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
 import { storageUtils } from '../../utils';
 import { AskHypeLogo } from '../branding/AskHypeLogo';
@@ -37,7 +37,7 @@ export const AskHypeShell = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaLimitPayload | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[] } | null>(null);
+  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[]; document: PendingDocument | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preferences = useMemo(() => storageUtils.getUserPreferences(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null;
@@ -63,11 +63,12 @@ export const AskHypeShell = () => {
   const submitPrompt = async (
     rawPrompt: string,
     images: PendingImage[] = [],
+    document: PendingDocument | null = null,
     options: { appendUser?: boolean; conversationId?: string } = {},
   ): Promise<boolean> => {
     const visiblePrompt = rawPrompt.trim();
     const prompt = visiblePrompt || (images.length ? 'Analiziraj priloženu sliku/slike i opiši relevantne informacije.' : '');
-    if (!prompt || loading) return false;
+    if (!prompt || loading || (document && images.length > 0)) return false;
 
     const now = new Date().toISOString();
     const existing = conversations.find(
@@ -75,7 +76,7 @@ export const AskHypeShell = () => {
     );
     const conversation: LocalConversation = existing ?? {
       id: createId(),
-      title: conversationTitle(visiblePrompt || 'Analiza slike'),
+      title: conversationTitle(visiblePrompt || (document ? document.file.name : 'Analiza slike')),
       createdAt: now,
       updatedAt: now,
       serverConversationId: null,
@@ -96,6 +97,8 @@ export const AskHypeShell = () => {
       role: 'user',
       text: visiblePrompt || 'Priložena slika',
       imagePreviews: images.map((image) => image.previewUrl),
+      documentName: document?.file.name,
+      documentType: document?.file.name.split('.').pop()?.toLocaleUpperCase(),
       createdAt: now,
     };
     const pendingConversation = {
@@ -106,24 +109,47 @@ export const AskHypeShell = () => {
 
     setActiveId(conversation.id);
     upsertConversation(pendingConversation);
-    setLastSubmission({ conversationId: conversation.id, text: prompt, images });
+    setLastSubmission({ conversationId: conversation.id, text: prompt, images, document });
     setLoading(true);
     setError(null);
     setQuota(null);
 
     try {
-      const result = await sendChatMessage(
-        {
-          message: prompt,
-          conversation_id: conversation.serverConversationId,
-          location: preferences.city || 'Beograd',
-          language: preferences.language || 'sr',
-          interests: preferences.interests ?? [],
-          history,
-        },
-        { accessToken: session?.access_token },
-        images,
-      );
+      let result;
+      if (document) {
+        const documentResult = await sendDocumentAnalysis(
+          document.file,
+          prompt,
+          { accessToken: session?.access_token },
+        );
+        const warningText = documentResult.data.warnings.length
+          ? `\n\nNapomene:\n${documentResult.data.warnings.map((warning) => `• ${warning}`).join('\n')}`
+          : '';
+        const data: ChatResponse = {
+          conversation_id: conversation.serverConversationId || `doc_${createId()}`,
+          provider: 'document',
+          answer_type: 'document_analysis',
+          summary: documentResult.data.answer + warningText,
+          recommendations: [],
+          follow_up_actions: [],
+          sources: [{ title: documentResult.data.filename }],
+          generated_at: documentResult.data.generated_at,
+        };
+        result = { data, usage: documentResult.usage };
+      } else {
+        result = await sendChatMessage(
+          {
+            message: prompt,
+            conversation_id: conversation.serverConversationId,
+            location: preferences.city || 'Beograd',
+            language: preferences.language || 'sr',
+            interests: preferences.interests ?? [],
+            history,
+          },
+          { accessToken: session?.access_token },
+          images,
+        );
+      }
       const assistantMessage: LocalMessage = {
         id: createId(),
         role: 'assistant',
@@ -251,7 +277,7 @@ export const AskHypeShell = () => {
                 quota={quota}
                 onRetry={() => {
                   if (lastSubmission) {
-                    void submitPrompt(lastSubmission.text, lastSubmission.images, {
+                    void submitPrompt(lastSubmission.text, lastSubmission.images, lastSubmission.document, {
                       appendUser: false,
                       conversationId: lastSubmission.conversationId,
                     });
@@ -270,7 +296,7 @@ export const AskHypeShell = () => {
 
           <div className="flex-none border-t border-chat-border bg-chat-bg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
             <div className="mx-auto max-w-3xl">
-              <PromptComposer onSubmit={(prompt, images) => submitPrompt(prompt, images)} disabled={loading || Boolean(quota)} />
+              <PromptComposer onSubmit={(prompt, images, document) => submitPrompt(prompt, images, document)} disabled={loading || Boolean(quota)} />
               <p className="mt-2 text-center text-[11px] text-chat-muted">
                 Proveri termine, cene i dostupnost pre odluke.
               </p>

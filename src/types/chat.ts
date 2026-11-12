@@ -8,6 +8,28 @@ export interface PendingImage {
   previewUrl: string;
 }
 
+export interface PendingDocument {
+  file: File;
+}
+
+export interface DocumentMetadata {
+  page_count: number | null;
+  sheet_names: string[];
+  rows_processed: number | null;
+  columns_processed: number | null;
+  extracted_characters: number;
+  truncated: boolean;
+}
+
+export interface DocumentAnalysisResponse {
+  filename: string;
+  file_type: 'pdf' | 'docx' | 'xlsx' | 'csv';
+  answer: string;
+  extracted_metadata: DocumentMetadata;
+  warnings: string[];
+  generated_at: string;
+}
+
 export interface ChatRequest {
   message: string;
   conversation_id?: string | null;

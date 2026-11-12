@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ImagePlus, X } from 'lucide-react';
-import type { PendingImage } from '../../types/chat';
+import { ArrowUp, FileText, ImagePlus, X } from 'lucide-react';
+import type { PendingDocument, PendingImage } from '../../types/chat';
 
 interface PromptComposerProps {
-  onSubmit: (value: string, images: PendingImage[]) => Promise<boolean>;
+  onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null) => Promise<boolean>;
   disabled?: boolean;
   autoFocus?: boolean;
 }
@@ -11,9 +11,11 @@ interface PromptComposerProps {
 export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }: PromptComposerProps) => {
   const [value, setValue] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
+  const [document, setDocument] = useState<PendingDocument | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -24,16 +26,19 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   const submit = async () => {
     const prompt = value.trim();
-    if ((!prompt && !images.length) || disabled) return;
-    if (await onSubmit(prompt, images)) {
+    if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
+    if (await onSubmit(prompt, images, document)) {
       setValue('');
+      images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
       setImages([]);
+      setDocument(null);
       setValidationError(null);
     }
   };
 
   const selectImages = (files: FileList | null) => {
     if (!files) return;
+    if (document) return setValidationError('Ukloni dokument pre dodavanja slika.');
     const selected = [...files];
     if (images.length + selected.length > 3) return setValidationError('Možeš poslati najviše 3 slike u jednoj poruci.');
     const invalid = selected.find((file) => !['image/jpeg', 'image/png', 'image/webp'].includes(file.type));
@@ -43,13 +48,42 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     setValidationError(null);
   };
 
+  const selectDocument = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    const extension = file.name.split('.').pop()?.toLocaleLowerCase();
+    const supported = ['pdf', 'docx', 'xlsx', 'csv'];
+    if (!extension || !supported.includes(extension)) {
+      return setValidationError('Podržani su samo PDF, Word, Excel i CSV dokumenti.');
+    }
+    if (!file.size || file.size > 15 * 1024 * 1024) {
+      return setValidationError('Dokument je prazan ili veći od dozvoljenih 15 MB.');
+    }
+    images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    setImages([]);
+    setDocument({ file });
+    setValidationError(null);
+  };
+
   return (
     <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
       {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
+      {document && (
+        <div className="m-1 flex items-center gap-3 rounded-xl border border-chat-border bg-chat-surface px-3 py-2">
+          <FileText size={18} className="flex-none text-hype-yellow" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-chat-text">{document.file.name}</p>
+            <p className="text-[11px] uppercase text-chat-muted">{document.file.name.split('.').pop()} · dokument</p>
+          </div>
+          <button type="button" onClick={() => setDocument(null)} aria-label="Ukloni dokument" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover hover:text-chat-text"><X size={16} /></button>
+        </div>
+      )}
       {validationError && <p className="px-2 pb-1 text-xs text-red-600">{validationError}</p>}
       <div className="flex items-end gap-2">
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
+        <input ref={documentInputRef} type="file" accept=".pdf,.docx,.xlsx,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => { selectDocument(event.target.files); event.target.value = ''; }}/>
         <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} aria-label="Dodaj slike" title="Dodaj slike" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover"><ImagePlus size={19}/></button>
+        <button type="button" disabled={disabled} onClick={() => documentInputRef.current?.click()} aria-label="Dodaj dokument" title="Documents — dodaj PDF, Word, Excel ili CSV" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover"><FileText size={19}/></button>
         <textarea
           ref={textareaRef}
           value={value}
@@ -64,13 +98,13 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           autoFocus={autoFocus}
           disabled={disabled}
           aria-label="Poruka za AskHype"
-          placeholder="Pitaj AskHype..."
+          placeholder={document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
           className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={disabled || (!value.trim() && !images.length)}
+          disabled={disabled || (document ? !value.trim() : (!value.trim() && !images.length))}
           aria-label="Pošalji poruku"
           title="Pošalji"
           className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full bg-hype-yellow text-chat-surface transition enabled:hover:bg-yellow-300 focus:outline-none focus:ring-2 focus:ring-hype-yellow focus:ring-offset-2 focus:ring-offset-chat-elevated disabled:cursor-not-allowed disabled:bg-chat-hover disabled:text-chat-muted"
