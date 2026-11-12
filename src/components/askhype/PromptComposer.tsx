@@ -13,10 +13,16 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const [images, setImages] = useState<PendingImage[]>([]);
   const [document, setDocument] = useState<PendingDocument | null>(null);
   const [documentAction, setDocumentAction] = useState<DocumentAction>('analyze');
+  const documentActionRef = useRef<DocumentAction>('analyze');
   const [validationError, setValidationError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  const selectDocumentAction = (action: DocumentAction) => {
+    documentActionRef.current = action;
+    setDocumentAction(action);
+  };
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -27,7 +33,8 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   const submit = async () => {
     const prompt = value.trim();
-    if (documentAction === 'transform') {
+    const selectedAction = documentActionRef.current;
+    if (selectedAction === 'transform') {
       if (!document) {
         setValidationError('Dokument je obavezan za Excel izmenu.');
         return;
@@ -38,12 +45,12 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       }
     }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
-    if (await onSubmit(prompt, images, document, documentAction)) {
+    if (await onSubmit(prompt, images, document, selectedAction)) {
       setValue('');
       images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
       setImages([]);
       setDocument(null);
-      setDocumentAction('analyze');
+      selectDocumentAction('analyze');
       setValidationError(null);
     }
   };
@@ -67,6 +74,9 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     const extension = file.name.split('.').pop()?.toLocaleLowerCase();
     const supported = ['pdf', 'docx', 'xlsx', 'csv'];
     if (!extension || !supported.includes(extension)) {
+      if (documentActionRef.current === 'presentation') {
+        return setValidationError('Za prezentaciju su podržani samo PDF, DOCX, XLSX i CSV dokumenti.');
+      }
       return setValidationError('Podržani su samo PDF, Word, Excel i CSV dokumenti.');
     }
     if (!file.size || file.size > 15 * 1024 * 1024) {
@@ -84,7 +94,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         <button
           type="button"
           onClick={() => {
-            setDocumentAction((current) => current === 'presentation' ? 'analyze' : 'presentation');
+            selectDocumentAction(documentActionRef.current === 'presentation' ? 'analyze' : 'presentation');
             images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
             setImages([]);
             setValidationError(null);
@@ -104,8 +114,8 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           </div>
           {documentAction !== 'presentation' && document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
             <div className="flex rounded-lg border border-chat-border p-0.5 text-[11px]">
-              <button type="button" onClick={() => setDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
-              <button type="button" onClick={() => setDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
+              <button type="button" onClick={() => selectDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
+              <button type="button" onClick={() => selectDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
             </div>
           )}
           <button type="button" onClick={() => setDocument(null)} aria-label="Ukloni dokument" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover hover:text-chat-text"><X size={16} /></button>

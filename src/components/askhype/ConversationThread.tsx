@@ -40,6 +40,10 @@ const AssistantResponse = ({
   <div className="space-y-5 lg:space-y-6">
     <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>
 
+    {response.answer_type === 'presentation_generation' && response.presentation_slide_count ? (
+      <p className="text-xs font-medium text-chat-muted">Broj slajdova: {response.presentation_slide_count}</p>
+    ) : null}
+
     {response.download && (response.download.url ? (
       <a href={response.download.url} download={response.download.filename} className="inline-flex items-center gap-2 rounded-full bg-hype-blue px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-hype-yellow">
         <Download size={16} /> {response.answer_type === 'presentation_generation' ? 'Preuzmi PowerPoint' : 'Preuzmi Excel'}

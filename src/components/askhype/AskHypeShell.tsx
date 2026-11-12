@@ -130,7 +130,7 @@ export const AskHypeShell = () => {
           provider: 'document', answer_type: 'presentation_generation',
           summary: presentation.summary + warningText,
           recommendations: [], follow_up_actions: [],
-          sources: document ? [{ title: document.file.name }] : [],
+          sources: [],
           generated_at: new Date().toISOString(),
           presentation_slide_count: presentation.slideCount,
           download: { filename: presentation.filename, url: URL.createObjectURL(presentation.blob), available: true },
