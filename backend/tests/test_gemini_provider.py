@@ -28,6 +28,7 @@ from app.schemas.chat import ChatRequest
 from app.schemas.attachments import ImageAttachment
 from app.schemas.documents import DocumentMetadata, ExtractedDocument
 from app.schemas.xlsx_transform import TransformationPlanEnvelope
+from app.schemas.presentations import PresentationPlanEnvelope
 from app.services.hype_retrieval import HypeContext, HypeDocument
 from app.services.chat_service import ChatService
 from app.services.public_sources import PublicSourceContext, PublicSourceReader, SourceFailure
@@ -302,6 +303,51 @@ def test_prompt_only_presentation_is_distinguished_and_malformed_plan_rejected()
         asyncio.run(provider.generate_presentation_plan("Napravi prezentaciju", 6, None))
     assert "Prompt-only mode" in models.calls[0]["contents"]
     assert "No source document or live research" in models.calls[0]["contents"]
+
+
+def test_raw_presentation_schema_exposes_gemini_incompatible_union_keywords() -> None:
+    raw = PresentationPlanEnvelope.model_json_schema()
+
+    assert len(_find_key(raw, "discriminator")) == 1
+    assert len(_find_key(raw, "const")) == 6
+    assert len(_find_key(raw, "oneOf")) == 1
+
+
+def test_prepared_presentation_schema_normalizes_union_without_weakening_it() -> None:
+    schema = prepare_gemini_response_schema(PresentationPlanEnvelope.model_json_schema())
+
+    assert _find_key(schema, "discriminator") == []
+    assert _find_key(schema, "const") == []
+    slide_items = schema["properties"]["plan"]["properties"]["slides"]["items"]
+    assert "oneOf" in slide_items
+    assert len(slide_items["oneOf"]) == 6
+    slide_types = {
+        branch["properties"]["type"]["enum"][0]
+        for branch in slide_items["oneOf"]
+    }
+    assert slide_types == {"title", "bullets", "section", "key_metrics", "table", "conclusion"}
+    assert slide_items["oneOf"][0]["properties"]["type"]["enum"] == ["title"]
+    assert schema["properties"]["plan"]["properties"]["slides"]["minItems"] == 3
+    assert schema["properties"]["plan"]["properties"]["slides"]["maxItems"] == 12
+
+
+def test_presentation_invalid_argument_schema_error_is_not_unavailable() -> None:
+    models = FakeModels(exc=FakeSdkError("400 INVALID_ARGUMENT: unsupported discriminator", 400))
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    with pytest.raises(AIProviderResponseError) as exc_info:
+        asyncio.run(provider.generate_presentation_plan("Napravi 6 slajdova", 6, None))
+
+    assert not isinstance(exc_info.value, AIProviderUnavailableError)
+    assert "discriminator" not in str(exc_info.value)
+
+
+def test_presentation_genuine_provider_failure_remains_unavailable() -> None:
+    models = FakeModels(exc=RuntimeError("network unavailable"))
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+
+    with pytest.raises(AIProviderUnavailableError):
+        asyncio.run(provider.generate_presentation_plan("Napravi 6 slajdova", 6, None))
 
 
 def test_hype_context_is_grounded_and_only_retrieved_urls_survive() -> None:

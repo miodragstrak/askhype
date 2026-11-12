@@ -35,7 +35,7 @@ from app.services.source_response import build_source_response
 logger = logging.getLogger(__name__)
 
 _URL_ADAPTER = TypeAdapter(AnyUrl)
-_UNSUPPORTED_GEMINI_SCHEMA_KEYS = frozenset({"default"})
+_UNSUPPORTED_GEMINI_SCHEMA_KEYS = frozenset({"default", "discriminator"})
 
 
 class GeminiRecommendation(BaseModel):
@@ -336,6 +336,9 @@ class GeminiProvider:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if self._is_invalid_request_schema_error(exc):
+                self._log_provider_failure("invalid_request_schema", exc)
+                raise AIProviderResponseError("Gemini presentation request schema was rejected.") from exc
             self._log_provider_failure("unavailable", exc)
             raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
         parsed = getattr(response, "parsed", None)
@@ -587,6 +590,9 @@ def sanitize_gemini_schema(value: object, *, inside_properties: bool = False) ->
         sanitized: dict[Any, Any] = {}
         for key, item in value.items():
             if not inside_properties and key in _UNSUPPORTED_GEMINI_SCHEMA_KEYS:
+                continue
+            if not inside_properties and key == "const":
+                sanitized["enum"] = [sanitize_gemini_schema(item)]
                 continue
             sanitized[key] = sanitize_gemini_schema(
                 item,
