@@ -19,10 +19,12 @@ export interface AuthContextValue {
   profile: Profile | null;
   isLoading: boolean;
   profileLoading: boolean;
+  isPasswordRecovery: boolean;
   signUp: (email: string, password: string, displayName: string) => Promise<{ session: Session | null }>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  completePasswordRecovery: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);

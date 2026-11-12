@@ -5,4 +5,6 @@ export { RecommendationDetailPage } from './RecommendationDetailPage';
 export { SavedPage } from './SavedPage';
 export { ProfilePage } from './ProfilePage';
 export { AuthPage } from './AuthPage';
+export { ForgotPasswordPage } from './ForgotPasswordPage';
+export { ResetPasswordPage } from './ResetPasswordPage';
 export { PremiumPage } from './PremiumPage';

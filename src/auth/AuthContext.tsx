@@ -9,6 +9,25 @@ import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../utils/supabase';
 import { AuthContext, type AuthContextValue, type Profile } from './AuthContextCore';
 
+const RECOVERY_STATE_KEY = 'askhype:password-recovery:v1';
+
+const readRecoveryState = () => {
+  try {
+    return sessionStorage.getItem(RECOVERY_STATE_KEY) === 'active';
+  } catch {
+    return false;
+  }
+};
+
+const writeRecoveryState = (active: boolean) => {
+  try {
+    if (active) sessionStorage.setItem(RECOVERY_STATE_KEY, 'active');
+    else sessionStorage.removeItem(RECOVERY_STATE_KEY);
+  } catch {
+    // Recovery still works in memory when browser storage is unavailable.
+  }
+};
+
 const mapProfile = (value: unknown): Profile | null => {
   if (!value || typeof value !== 'object') return null;
   const row = value as Partial<Profile>;
@@ -32,6 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(readRecoveryState);
   const profileRequestIdRef = useRef(0);
   const currentUserIdRef = useRef<string | null>(null);
 
@@ -88,16 +108,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
       applySession(data.session);
+      if (!data.session) {
+        setIsPasswordRecovery(false);
+        writeRecoveryState(false);
+      }
       setIsLoading(false);
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(Boolean(nextSession));
+        writeRecoveryState(Boolean(nextSession));
+      } else if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        setIsPasswordRecovery(false);
+        writeRecoveryState(false);
+      }
       if (
         event === 'INITIAL_SESSION' ||
         event === 'SIGNED_IN' ||
         event === 'SIGNED_OUT' ||
         event === 'TOKEN_REFRESHED' ||
-        event === 'USER_UPDATED'
+        event === 'USER_UPDATED' ||
+        event === 'PASSWORD_RECOVERY'
       ) {
         applySession(nextSession);
         setIsLoading(false);
@@ -155,6 +187,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await loadProfile(user.id);
   }, [clearProfile, loadProfile, user]);
 
+  const completePasswordRecovery = useCallback(() => {
+    setIsPasswordRecovery(false);
+    writeRecoveryState(false);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -162,12 +199,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       profile,
       isLoading,
       profileLoading,
+      isPasswordRecovery,
       signUp,
       signIn,
       signOut,
       refreshProfile,
+      completePasswordRecovery,
     }),
-    [isLoading, profile, profileLoading, refreshProfile, session, signIn, signOut, signUp, user],
+    [completePasswordRecovery, isLoading, isPasswordRecovery, profile, profileLoading, refreshProfile, session, signIn, signOut, signUp, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

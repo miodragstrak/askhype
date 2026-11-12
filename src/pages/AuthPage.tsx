@@ -224,6 +224,18 @@ export const AuthPage: React.FC = () => {
                 />
               </label>
 
+              {!isSignUp && (
+                <div className="-mt-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/forgot-password')}
+                    className="text-xs font-semibold text-navy-700 underline decoration-hype-yellow decoration-2 underline-offset-4 hover:text-navy-900 focus:outline-none focus:ring-2 focus:ring-navy-900"
+                  >
+                    Zaboravili ste lozinku?
+                  </button>
+                </div>
+              )}
+
               {isSignUp && (
                 <label className="block">
                   <span className="mb-2 block text-xs font-bold text-navy-700">Potvrdi lozinku</span>
