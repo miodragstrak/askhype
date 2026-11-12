@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, FileText, ImagePlus, Presentation, X } from 'lucide-react';
 import type { DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 
+const hasPresentationIntent = (value: string): boolean => {
+  const prompt = value.toLocaleLowerCase('sr').replace(/\s+/g, ' ').trim();
+  return [
+    'napravi prezentaciju',
+    'kreiraj prezentaciju',
+    'napravi powerpoint',
+    'kreiraj powerpoint',
+    'pptx',
+    'presentation',
+    'powerpoint presentation',
+  ].some((phrase) => prompt.includes(phrase));
+};
+
 interface PromptComposerProps {
   onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null, action: DocumentAction) => Promise<boolean>;
   disabled?: boolean;
@@ -14,13 +27,15 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const [document, setDocument] = useState<PendingDocument | null>(null);
   const [documentAction, setDocumentAction] = useState<DocumentAction>('analyze');
   const documentActionRef = useRef<DocumentAction>('analyze');
+  const actionExplicitRef = useRef(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
-  const selectDocumentAction = (action: DocumentAction) => {
+  const selectDocumentAction = (action: DocumentAction, explicit = true) => {
     documentActionRef.current = action;
+    actionExplicitRef.current = explicit;
     setDocumentAction(action);
   };
 
@@ -33,7 +48,12 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   const submit = async () => {
     const prompt = value.trim();
-    const selectedAction = documentActionRef.current;
+    const selectedAction = actionExplicitRef.current
+      ? documentActionRef.current
+      : hasPresentationIntent(prompt) ? 'presentation' : 'analyze';
+    if (!actionExplicitRef.current && selectedAction !== documentActionRef.current) {
+      selectDocumentAction(selectedAction, false);
+    }
     if (selectedAction === 'transform') {
       if (!document) {
         setValidationError('Dokument je obavezan za Excel izmenu.');
@@ -50,7 +70,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
       setImages([]);
       setDocument(null);
-      selectDocumentAction('analyze');
+      selectDocumentAction('analyze', false);
       setValidationError(null);
     }
   };
@@ -90,7 +110,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   return (
     <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
-      <div className="flex items-center justify-end px-1 pb-1">
+      {!document && <div className="flex items-center justify-end px-1 pb-1">
         <button
           type="button"
           onClick={() => {
@@ -103,7 +123,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         >
           <Presentation size={14} /> {documentAction === 'presentation' ? 'Prezentacija' : 'Napravi prezentaciju'}
         </button>
-      </div>
+      </div>}
       {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
       {document && (
         <div className="m-1 flex items-center gap-3 rounded-xl border border-chat-border bg-chat-surface px-3 py-2">
@@ -112,12 +132,13 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
             <p className="truncate text-sm font-medium text-chat-text">{document.file.name}</p>
             <p className="text-[11px] uppercase text-chat-muted">{document.file.name.split('.').pop()} · dokument</p>
           </div>
-          {documentAction !== 'presentation' && document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
-            <div className="flex rounded-lg border border-chat-border p-0.5 text-[11px]">
-              <button type="button" onClick={() => selectDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
+          <div className="flex flex-wrap justify-end rounded-lg border border-chat-border p-0.5 text-[11px]">
+            <button type="button" onClick={() => selectDocumentAction('analyze')} className={`rounded-md px-2 py-1 ${documentAction === 'analyze' ? 'bg-chat-hover text-chat-text' : 'text-chat-muted'}`}>Analiziraj</button>
+            {document.file.name.toLocaleLowerCase().endsWith('.xlsx') && (
               <button type="button" onClick={() => selectDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
-            </div>
-          )}
+            )}
+            <button type="button" onClick={() => selectDocumentAction('presentation')} className={`rounded-md px-2 py-1 ${documentAction === 'presentation' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Prezentacija</button>
+          </div>
           <button type="button" onClick={() => setDocument(null)} aria-label="Ukloni dokument" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover hover:text-chat-text"><X size={16} /></button>
         </div>
       )}
@@ -130,7 +151,13 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setValue(nextValue);
+            if (!actionExplicitRef.current) {
+              selectDocumentAction(hasPresentationIntent(nextValue) ? 'presentation' : 'analyze', false);
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
