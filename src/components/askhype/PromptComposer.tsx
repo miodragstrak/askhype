@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, FileText, ImagePlus, Presentation, X } from 'lucide-react';
+import { ArrowUp, FileSearch, FileText, ImagePlus, Presentation, X } from 'lucide-react';
 import type { DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 
 const hasPresentationIntent = (value: string): boolean => {
@@ -64,6 +64,10 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         return;
       }
     }
+    if (selectedAction === 'research' && images.length) {
+      setValidationError('Deep Research podržava pitanje i najviše jedan dokument, ne slike.');
+      return;
+    }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
     if (await onSubmit(prompt, images, document, selectedAction)) {
       setValue('');
@@ -78,6 +82,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const selectImages = (files: FileList | null) => {
     if (!files) return;
     if (documentAction === 'presentation') return setValidationError('Slike nisu podržane kao izvor za prezentaciju.');
+    if (documentAction === 'research') return setValidationError('Slike nisu podržane za Deep Research.');
     if (document) return setValidationError('Ukloni dokument pre dodavanja slika.');
     const selected = [...files];
     if (images.length + selected.length > 3) return setValidationError('Možeš poslati najviše 3 slike u jednoj poruci.');
@@ -110,7 +115,14 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
 
   return (
     <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
-      {!document && <div className="flex items-center justify-end px-1 pb-1">
+      {!document && <div className="flex items-center justify-end gap-1 px-1 pb-1">
+        <button
+          type="button"
+          onClick={() => { selectDocumentAction(documentActionRef.current === 'research' ? 'analyze' : 'research'); setValidationError(null); }}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${documentAction === 'research' ? 'bg-hype-blue text-white' : 'text-chat-muted hover:bg-chat-hover hover:text-chat-text'}`}
+        >
+          <FileSearch size={14} /> Deep Research
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -138,6 +150,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
               <button type="button" onClick={() => selectDocumentAction('transform')} className={`rounded-md px-2 py-1 ${documentAction === 'transform' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Uredi Excel</button>
             )}
             <button type="button" onClick={() => selectDocumentAction('presentation')} className={`rounded-md px-2 py-1 ${documentAction === 'presentation' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Prezentacija</button>
+            <button type="button" onClick={() => selectDocumentAction('research')} className={`rounded-md px-2 py-1 ${documentAction === 'research' ? 'bg-hype-blue text-white' : 'text-chat-muted'}`}>Deep Research</button>
           </div>
           <button type="button" onClick={() => setDocument(null)} aria-label="Ukloni dokument" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover hover:text-chat-text"><X size={16} /></button>
         </div>
@@ -168,7 +181,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           autoFocus={autoFocus}
           disabled={disabled}
           aria-label="Poruka za AskHype"
-          placeholder={documentAction === 'presentation' ? 'Opiši PowerPoint prezentaciju...' : documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
+          placeholder={documentAction === 'research' ? 'Postavi pitanje za dubinsko istraživanje...' : documentAction === 'presentation' ? 'Opiši PowerPoint prezentaciju...' : documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
           className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button

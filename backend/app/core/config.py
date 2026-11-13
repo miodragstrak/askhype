@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: int = Field(default=45, gt=0)
     gemini_temperature: float = 0.4
     gemini_max_output_tokens: int = Field(default=4096, gt=0)
+    gemini_research_model: str | None = None
+    research_daily_limit: int = Field(default=3, gt=0)
+    research_max_depth: Literal["quick", "standard", "deep"] = "standard"
     quota_enforcement_enabled: bool = False
     supabase_url: str | None = None
     supabase_secret_key: SecretStr | None = None
@@ -65,6 +68,10 @@ class Settings(BaseSettings):
             errors.append("ANONYMOUS_ID_PEPPER is required")
         if not _has_secret(self.gemini_api_key):
             errors.append("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
+        if self.gemini_research_model is not None and not self.gemini_research_model.strip():
+            errors.append("GEMINI_RESEARCH_MODEL must be non-empty when configured")
+        if self.gemini_research_model and not self.gemini_research_model.startswith("deep-research-"):
+            errors.append("GEMINI_RESEARCH_MODEL must identify a Deep Research agent")
         if not origins:
             errors.append("FRONTEND_ORIGIN or FRONTEND_ORIGINS is required")
         if "*" in origins:

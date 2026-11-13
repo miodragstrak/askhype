@@ -40,6 +40,24 @@ const AssistantResponse = ({
   <div className="space-y-5 lg:space-y-6">
     <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>
 
+    {response.research ? (
+      <div className="space-y-5">
+        <h2 className="text-xl font-semibold text-chat-text">{response.research.title}</h2>
+        {response.research.sections.map((section, index) => (
+          <section key={`${section.heading}-${index}`} className="space-y-2">
+            <h3 className="text-base font-semibold text-chat-text">{section.heading}</h3>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-chat-text">{section.content}</p>
+          </section>
+        ))}
+        {response.research.limitations.length > 0 ? (
+          <div className="rounded-lg border border-chat-border bg-chat-elevated p-3 text-xs leading-5 text-chat-muted">
+            <span className="font-semibold text-chat-text">Ograničenja: </span>
+            {response.research.limitations.join(' ')}
+          </div>
+        ) : null}
+      </div>
+    ) : null}
+
     {response.answer_type === 'presentation_generation' && response.presentation_slide_count ? (
       <p className="text-xs font-medium text-chat-muted">Broj slajdova: {response.presentation_slide_count}</p>
     ) : null}
@@ -218,7 +236,7 @@ export const ConversationThread = ({
     {loading && (
       <div className="flex items-center gap-3 text-sm text-chat-muted" role="status">
         <Loader2 size={17} className="animate-spin" />
-        AskHype razmišlja...
+        AskHype radi na odgovoru...
       </div>
     )}
 

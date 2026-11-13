@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import type { ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage } from '../types/chat';
+import type { ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage, ResearchJob } from '../types/chat';
 import { getAnonymousId } from '../utils/anonymous-id';
 
 interface BackendValidationError {
@@ -348,4 +348,53 @@ export const getUsage = async (options: ApiRequestOptions = {}): Promise<UsageSn
   }
 
   return response.json();
+};
+
+export const startResearch = async (
+  query: string, file: File | null, options: ApiRequestOptions = {},
+): Promise<ResearchJob> => {
+  const body = new FormData();
+  body.append('request', JSON.stringify({ query, language: 'sr', depth: 'standard' }));
+  if (file) body.append('file', file);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/research`, {
+      method: 'POST', headers: authHeaders(options.accessToken), body, signal: options.signal,
+    });
+  } catch {
+    throw new ApiError('Deep Research trenutno nije dostupan. Pokušaj ponovo.', 0);
+  }
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+  return response.json();
+};
+
+export const getResearch = async (
+  researchId: string, options: ApiRequestOptions = {},
+): Promise<ResearchJob> => {
+  const response = await fetch(`${API_BASE_URL}/api/research/${encodeURIComponent(researchId)}`, {
+    headers: authHeaders(options.accessToken), signal: options.signal,
+  });
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+  return response.json();
+};
+
+export const runResearch = async (
+  query: string, file: File | null, options: ApiRequestOptions = {},
+): Promise<ResearchJob> => {
+  let job = await startResearch(query, file, options);
+  for (let poll = 0; poll < 360 && !['completed', 'failed'].includes(job.status); poll += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 10_000));
+    job = await getResearch(job.research_id, options);
+  }
+  if (job.status === 'failed') throw new ApiError('Deep Research nije uspeo. Pokušaj ponovo.', 502);
+  if (job.status !== 'completed' || !job.result) throw new ApiError('Deep Research je prekoračio dozvoljeno vreme.', 504);
+  return job;
 };

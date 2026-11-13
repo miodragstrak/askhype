@@ -12,7 +12,30 @@ export interface PendingDocument {
   file: File;
 }
 
-export type DocumentAction = 'analyze' | 'transform' | 'presentation';
+export type DocumentAction = 'analyze' | 'transform' | 'presentation' | 'research';
+
+export interface ResearchSection { heading: string; content: string; }
+export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; }
+export interface ResearchResult {
+  research_id: string;
+  status: 'completed';
+  title: string;
+  summary: string;
+  sections: ResearchSection[];
+  sources: ResearchSource[];
+  limitations: string[];
+  generated_at: string;
+  provider: string;
+  model: string;
+}
+export interface ResearchJob {
+  research_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  created_at: string;
+  updated_at: string;
+  result?: ResearchResult | null;
+  failure_category?: string | null;
+}
 
 export interface TransformationDownload {
   filename: string;
@@ -58,6 +81,7 @@ export interface ChatResponse {
   generated_at: string;
   download?: TransformationDownload;
   presentation_slide_count?: number;
+  research?: ResearchResult;
 }
 
 export interface ChatRecommendation {

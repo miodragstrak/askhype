@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, runResearch, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
 import type { ChatResponse, DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
@@ -118,7 +118,18 @@ export const AskHypeShell = () => {
 
     try {
       let result;
-      if (documentAction === 'presentation') {
+      if (documentAction === 'research') {
+        const job = await runResearch(prompt, document?.file ?? null, { accessToken: session?.access_token });
+        if (!job.result) throw new Error('Deep Research nije vratio rezultat.');
+        const data: ChatResponse = {
+          conversation_id: conversation.serverConversationId || `research_${job.research_id}`,
+          provider: job.result.provider, answer_type: 'deep_research', summary: job.result.summary,
+          recommendations: [], follow_up_actions: [],
+          sources: job.result.sources.map((source) => ({ title: source.title, url: source.url })),
+          generated_at: job.result.generated_at, research: job.result,
+        };
+        result = { data, usage: null };
+      } else if (documentAction === 'presentation') {
         const presentation = await sendPresentationGeneration(
           prompt, document?.file ?? null, { accessToken: session?.access_token },
         );

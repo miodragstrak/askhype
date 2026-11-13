@@ -6,6 +6,7 @@ from app.api.routes.documents import router as documents_router
 from app.api.routes.health import router as health_router
 from app.api.routes.mock_subscription import router as mock_subscription_router
 from app.api.routes.presentations import router as presentations_router
+from app.api.routes.research import router as research_router
 from app.api.routes.usage import router as usage_router
 from app.clients.supabase import validate_supabase_server_config
 from app.core.config import settings
@@ -39,6 +40,7 @@ app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(chat_router, prefix=settings.api_prefix)
 app.include_router(documents_router, prefix=settings.api_prefix)
 app.include_router(presentations_router, prefix=settings.api_prefix)
+app.include_router(research_router, prefix=settings.api_prefix)
 app.include_router(usage_router, prefix=settings.api_prefix)
 app.include_router(mock_subscription_router, prefix=settings.api_prefix)
 

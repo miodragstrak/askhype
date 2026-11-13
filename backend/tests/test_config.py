@@ -69,6 +69,14 @@ def test_complete_production_configuration_is_valid() -> None:
     assert app_settings.allowed_frontend_origins == ["https://askhype.example"]
 
 
+def test_research_agent_configuration_is_optional_but_must_be_deep_research() -> None:
+    assert _production_settings(gemini_research_model=None).gemini_research_model is None
+    configured = _production_settings(gemini_research_model="deep-research-preview-04-2026")
+    assert configured.gemini_research_model == "deep-research-preview-04-2026"
+    with pytest.raises(ValidationError, match="must identify a Deep Research agent"):
+        _production_settings(gemini_research_model="gemini-3.5-flash-lite")
+
+
 @pytest.mark.parametrize(
     ("override", "expected"),
     [

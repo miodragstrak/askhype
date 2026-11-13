@@ -17,9 +17,22 @@ from app.repositories.profile_repository import (
     SupabaseProfileRepository,
 )
 from app.services.usage_service import UsageService
+from app.repositories.research_repository import InMemoryResearchRepository, SupabaseResearchRepository, ResearchRepository
+from app.providers.research import GeminiResearchProvider, ResearchProvider
 
 _memory_usage_repository = InMemoryUsageRepository()
 _memory_profile_repository = InMemoryProfileRepository()
+_memory_research_repository = InMemoryResearchRepository()
+
+
+async def get_research_repository() -> ResearchRepository:
+    if settings.quota_enforcement_enabled:
+        return SupabaseResearchRepository()
+    return _memory_research_repository
+
+
+async def get_research_provider() -> ResearchProvider:
+    return GeminiResearchProvider()
 
 
 def get_usage_repository() -> UsageRepository:
