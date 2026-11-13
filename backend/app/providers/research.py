@@ -220,6 +220,7 @@ def _concise_summary(value: str, limit: int = 600) -> str:
 def _extract_sources(interaction: Any) -> list[ResearchSource]:
     found: dict[str, dict[str, Any]] = {}
     generated_labels = _provider_generated_source_labels(interaction)
+    generated_citations = _provider_generated_citation_ids(interaction)
     for step in getattr(interaction, "steps", None) or []:
         for content in getattr(step, "content", None) or []:
             text = getattr(content, "text", None)
@@ -232,7 +233,7 @@ def _extract_sources(interaction: Any) -> list[ResearchSource]:
                 display_label, original_url = _annotation_source_label(annotation, url, generated_labels)
                 data = found.setdefault(url, {
                     "title": display_label or "", "display_label": display_label,
-                    "original_url": original_url, "citation_ids": set(),
+                    "original_url": original_url, "citation_ids": set(generated_citations.get(url, ())),
                 })
                 if data["display_label"] is None and display_label is not None:
                     data.update(title=display_label, display_label=display_label, original_url=original_url)
@@ -272,6 +273,14 @@ def _citation_ids_for_span(text: str, start: int | None, end: int | None) -> lis
 
 
 _MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]\n]{1,200})\]\((https?://[^\s)]+)\)")
+_CITATION_SOURCE_LINE_PATTERN = re.compile(
+    r"\[cite:\s*([0-9]+(?:\s*,\s*[0-9]+)*)\][^\n]{0,240}?\[[^\]\n]{1,200}\]\((https?://[^\s)]+)\)",
+    re.IGNORECASE,
+)
+_NUMBERED_SOURCE_LINE_PATTERN = re.compile(
+    r"^\s*([0-9]+)[.)]\s+[^\n]{0,120}?\[[^\]\n]{1,200}\]\((https?://[^\s)]+)\)",
+    re.MULTILINE,
+)
 _GROUNDING_REDIRECT_HOSTS = frozenset({
     "vertexaisearch.cloud.google.com",
     "grounding-api-redirect.googleapis.com",
@@ -338,3 +347,18 @@ def _provider_generated_source_labels(interaction: Any) -> dict[str, str]:
             if cleaned:
                 labels.setdefault(url, cleaned)
     return labels
+
+
+def _provider_generated_citation_ids(interaction: Any) -> dict[str, set[int]]:
+    citations: dict[str, set[int]] = {}
+    texts = [getattr(interaction, "output_text", None)]
+    for step in getattr(interaction, "steps", None) or []:
+        texts.extend(getattr(content, "text", None) for content in getattr(step, "content", None) or [])
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for values, url in _CITATION_SOURCE_LINE_PATTERN.findall(text):
+            citations.setdefault(url, set()).update(int(value.strip()) for value in values.split(","))
+        for value, url in _NUMBERED_SOURCE_LINE_PATTERN.findall(text):
+            citations.setdefault(url, set()).add(int(value))
+    return citations

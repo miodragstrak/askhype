@@ -196,6 +196,34 @@ def test_grounding_redirect_uses_exact_provider_generated_markdown_label():
     assert str(source.url) == redirect
 
 
+def test_provider_generated_source_entry_can_supply_exact_citation_mapping():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-token"
+    annotation = SimpleNamespace(url=redirect, title=None, start_index=None, end_index=None)
+    interaction = SimpleNamespace(
+        output_text=f"Sources:\n[cite: 2, 4] [medium.com]({redirect})",
+        steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=[annotation])])],
+    )
+    source = _extract_sources(interaction)[0]
+    assert source.citation_ids == [2, 4]
+    assert str(source.url) == redirect
+
+
+def test_numbered_source_metadata_maps_only_the_explicit_same_line_url():
+    first = "https://one.example/article"
+    second = "https://two.example/article"
+    annotations = [
+        SimpleNamespace(url=first, title=None, start_index=None, end_index=None),
+        SimpleNamespace(url=second, title=None, start_index=None, end_index=None),
+    ]
+    interaction = SimpleNamespace(
+        output_text=f"1. [Prvi]({first})\n2. [Drugi]({second})",
+        steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=annotations)])],
+    )
+    by_url = {str(source.url): source.citation_ids for source in _extract_sources(interaction)}
+    assert by_url[first] == [1]
+    assert by_url[second] == [2]
+
+
 def test_grounding_redirect_without_metadata_has_numbered_ui_fallback_data():
     redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-secret-token"
     annotation = SimpleNamespace(url=redirect, title=None, start_index=None, end_index=None)

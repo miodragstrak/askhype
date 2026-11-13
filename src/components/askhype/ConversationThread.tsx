@@ -1,8 +1,9 @@
 import { Download, ExternalLink, FileText, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
-import type { ReactNode } from 'react';
 import type { QuotaLimitPayload } from '../../services/chat-api';
-import type { ChatResponse, ResearchSource } from '../../types/chat';
+import type { ChatResponse } from '../../types/chat';
 import type { LocalMessage } from '../../types/conversation';
+import { ResearchMarkdown } from './ResearchMarkdown';
+import { cleanResearchSourceLabel } from './research-display';
 
 interface ConversationThreadProps {
   messages: LocalMessage[];
@@ -29,55 +30,6 @@ const hypeSourceOwner = (url: string): string | null => {
   return null;
 };
 
-const isGroundingRedirectHost = (host: string): boolean =>
-  ['vertexaisearch.cloud.google.com', 'grounding-api-redirect.googleapis.com'].includes(host) || host.includes('grounding-api-redirect');
-
-const cleanResearchSourceLabel = (source: ResearchSource, fallbackIndex: number): string => {
-  for (const candidate of [source.display_label, source.title, source.publisher]) {
-    const label = candidate?.trim();
-    if (label && !/^https?:\/\//i.test(label) && !isGroundingRedirectHost(label.replace(/^www\./, ''))) return label;
-  }
-  if (source.original_url) {
-    try {
-      const host = new URL(source.original_url).hostname.replace(/^www\./, '');
-      if (!isGroundingRedirectHost(host)) return host;
-    } catch { /* fall through to safe fallback */ }
-  }
-  try {
-    const host = new URL(source.url).hostname.replace(/^www\./, '');
-    if (!isGroundingRedirectHost(host)) return host;
-  } catch {
-    // Use the stable numbered fallback below.
-  }
-  return `Izvor ${fallbackIndex}`;
-};
-
-const renderResearchText = (text: string, sources: ResearchSource[]): ReactNode[] => {
-  const citationPattern = /\[cite:\s*([0-9]+(?:\s*,\s*[0-9]+)*)\]/gi;
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  for (const match of text.matchAll(citationPattern)) {
-    const index = match.index ?? 0;
-    if (index > cursor) nodes.push(text.slice(cursor, index));
-    const ids = match[1].split(',').map((value) => Number(value.trim()));
-    nodes.push(...ids.map((id) => {
-      const matches = sources.filter((source) => source.citation_ids?.includes(id));
-      if (matches.length !== 1) return <span key={`${index}-${id}`}>[cite: {id}]</span>;
-      const source = matches[0];
-      return (
-        <a key={`${index}-${id}`} href={source.url} target="_blank" rel="noreferrer"
-          aria-label={`Otvori izvor ${id}: ${cleanResearchSourceLabel(source, id)}`}
-          className="mx-0.5 inline-flex rounded px-1 text-xs font-semibold text-hype-blue underline decoration-chat-outline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-hype-yellow">
-          [{id}]
-        </a>
-      );
-    }));
-    cursor = index + match[0].length;
-  }
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return nodes;
-};
-
 const AssistantResponse = ({
   response,
   onFollowUp,
@@ -102,14 +54,14 @@ const AssistantResponse = ({
         <h2 className="text-xl font-semibold text-chat-text">{response.research.title}</h2>
         <section className="space-y-2">
           <h3 className="text-base font-semibold text-chat-text">Kratak odgovor</h3>
-          <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{renderResearchText(response.research.summary, response.research.sources)}</p>
+          <ResearchMarkdown text={response.research.summary} sources={response.research.sources} compact />
         </section>
         <section className="space-y-4">
           <h3 className="text-base font-semibold text-chat-text">Detaljno istraživanje</h3>
           {researchSections?.map((section, index) => (
             <div key={`${section.heading}-${index}`} className="space-y-2">
               <h4 className="text-sm font-semibold text-chat-text">{section.heading}</h4>
-              <p className="whitespace-pre-wrap text-sm leading-7 text-chat-text">{renderResearchText(section.content, response.research!.sources)}</p>
+              <ResearchMarkdown text={section.content} sources={response.research!.sources} />
             </div>
           ))}
         </section>
