@@ -29,17 +29,27 @@ const hypeSourceOwner = (url: string): string | null => {
   return null;
 };
 
-const cleanResearchSourceLabel = (source: ResearchSource): string => {
-  const title = source.title.trim();
-  if (title && !/^https?:\/\//i.test(title) && !title.includes('grounding-api-redirect')) return title;
-  const publisher = source.publisher?.trim();
-  if (publisher && !publisher.includes('grounding-api-redirect')) return publisher.replace(/^www\./, '');
+const isGroundingRedirectHost = (host: string): boolean =>
+  ['vertexaisearch.cloud.google.com', 'grounding-api-redirect.googleapis.com'].includes(host) || host.includes('grounding-api-redirect');
+
+const cleanResearchSourceLabel = (source: ResearchSource, fallbackIndex: number): string => {
+  for (const candidate of [source.display_label, source.title, source.publisher]) {
+    const label = candidate?.trim();
+    if (label && !/^https?:\/\//i.test(label) && !isGroundingRedirectHost(label.replace(/^www\./, ''))) return label;
+  }
+  if (source.original_url) {
+    try {
+      const host = new URL(source.original_url).hostname.replace(/^www\./, '');
+      if (!isGroundingRedirectHost(host)) return host;
+    } catch { /* fall through to safe fallback */ }
+  }
   try {
     const host = new URL(source.url).hostname.replace(/^www\./, '');
-    return host.includes('grounding-api-redirect') ? 'Google izvor' : host;
+    if (!isGroundingRedirectHost(host)) return host;
   } catch {
-    return 'Izvor';
+    // Use the stable numbered fallback below.
   }
+  return `Izvor ${fallbackIndex}`;
 };
 
 const renderResearchText = (text: string, sources: ResearchSource[]): ReactNode[] => {
@@ -51,12 +61,12 @@ const renderResearchText = (text: string, sources: ResearchSource[]): ReactNode[
     if (index > cursor) nodes.push(text.slice(cursor, index));
     const ids = match[1].split(',').map((value) => Number(value.trim()));
     nodes.push(...ids.map((id) => {
-      const matches = sources.filter((source) => source.citation_ids.includes(id));
+      const matches = sources.filter((source) => source.citation_ids?.includes(id));
       if (matches.length !== 1) return <span key={`${index}-${id}`}>[cite: {id}]</span>;
       const source = matches[0];
       return (
         <a key={`${index}-${id}`} href={source.url} target="_blank" rel="noreferrer"
-          aria-label={`Otvori izvor ${id}: ${cleanResearchSourceLabel(source)}`}
+          aria-label={`Otvori izvor ${id}: ${cleanResearchSourceLabel(source, id)}`}
           className="mx-0.5 inline-flex rounded px-1 text-xs font-semibold text-hype-blue underline decoration-chat-outline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-hype-yellow">
           [{id}]
         </a>
@@ -109,10 +119,10 @@ const AssistantResponse = ({
             <ol className="space-y-2 text-xs text-chat-muted">
               {response.research.sources.map((source, index) => (
                 <li key={source.url} className="flex gap-2">
-                  <span className="w-8 flex-none text-right">{source.citation_ids.length ? source.citation_ids.join(',') : index + 1}.</span>
+                  <span className="w-8 flex-none text-right">{source.citation_ids?.length ? source.citation_ids.join(',') : index + 1}.</span>
                   <a href={source.url} target="_blank" rel="noreferrer"
                     className="inline-flex min-w-0 items-center gap-1 underline decoration-chat-outline underline-offset-4 hover:text-chat-text">
-                    <span className="truncate">{cleanResearchSourceLabel(source)}</span><ExternalLink size={11} className="flex-none" />
+                    <span className="truncate">{cleanResearchSourceLabel(source, index + 1)}</span><ExternalLink size={11} className="flex-none" />
                   </a>
                 </li>
               ))}

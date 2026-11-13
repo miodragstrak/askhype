@@ -27,6 +27,8 @@ class ResearchSource(BaseModel):
     publisher: str | None = None
     date: str | None = None
     citation_ids: list[int] = Field(default_factory=list)
+    display_label: str | None = None
+    original_url: AnyHttpUrl | None = None
 
 
 class ResearchQuotaSnapshot(BaseModel):

@@ -219,6 +219,7 @@ def _concise_summary(value: str, limit: int = 600) -> str:
 
 def _extract_sources(interaction: Any) -> list[ResearchSource]:
     found: dict[str, dict[str, Any]] = {}
+    generated_labels = _provider_generated_source_labels(interaction)
     for step in getattr(interaction, "steps", None) or []:
         for content in getattr(step, "content", None) or []:
             text = getattr(content, "text", None)
@@ -228,8 +229,13 @@ def _extract_sources(interaction: Any) -> list[ResearchSource]:
                 url = getattr(annotation, "url", None)
                 if not isinstance(url, str) or not url.startswith(("http://", "https://")):
                     continue
-                title = getattr(annotation, "title", None) or urlsplit(url).netloc
-                found.setdefault(url, {"title": _clean_source_label(str(title), url), "citation_ids": set()})
+                display_label, original_url = _annotation_source_label(annotation, url, generated_labels)
+                data = found.setdefault(url, {
+                    "title": display_label or "", "display_label": display_label,
+                    "original_url": original_url, "citation_ids": set(),
+                })
+                if data["display_label"] is None and display_label is not None:
+                    data.update(title=display_label, display_label=display_label, original_url=original_url)
                 groups.setdefault((getattr(annotation, "start_index", None), getattr(annotation, "end_index", None)), []).append(annotation)
             if not isinstance(text, str):
                 continue
@@ -241,7 +247,8 @@ def _extract_sources(interaction: Any) -> list[ResearchSource]:
                     found[annotation.url]["citation_ids"].add(citation_id)
     return [
         ResearchSource(
-            title=data["title"], url=url, publisher=urlsplit(url).netloc,
+            title=data["title"], url=url, publisher=data["display_label"],
+            display_label=data["display_label"], original_url=data["original_url"],
             citation_ids=sorted(data["citation_ids"]),
         )
         for url, data in found.items()
@@ -264,8 +271,70 @@ def _citation_ids_for_span(text: str, start: int | None, end: int | None) -> lis
     return [int(value.strip()) for value in match.group(1).split(",")]
 
 
-def _clean_source_label(title: str, url: str) -> str:
-    compact = " ".join(title.split()).strip()
-    if compact and not compact.startswith(("http://", "https://")):
-        return compact[:200]
-    return urlsplit(url).netloc.removeprefix("www.") or "Izvor"
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]\n]{1,200})\]\((https?://[^\s)]+)\)")
+_GROUNDING_REDIRECT_HOSTS = frozenset({
+    "vertexaisearch.cloud.google.com",
+    "grounding-api-redirect.googleapis.com",
+})
+
+
+def _is_grounding_redirect(url: str) -> bool:
+    parsed = urlsplit(url)
+    host = parsed.hostname.casefold() if parsed.hostname else ""
+    return host in _GROUNDING_REDIRECT_HOSTS or "grounding-api-redirect" in parsed.path.casefold()
+
+
+def _clean_source_label(value: object, source_url: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = " ".join(value.split()).strip(" []()")
+    if not compact or compact.startswith(("http://", "https://")) or len(compact) > 200:
+        return None
+    if compact.casefold() in {"source", "izvor", "link", "citation"}:
+        return None
+    if compact.casefold().removeprefix("www.") in _GROUNDING_REDIRECT_HOSTS:
+        return None
+    if "grounding-api-redirect" in compact.casefold():
+        return None
+    return compact
+
+
+def _annotation_source_label(
+    annotation: Any, source_url: str, generated_labels: dict[str, str],
+) -> tuple[str | None, str | None]:
+    for field in ("title", "publisher", "domain", "source_title", "label"):
+        label = _clean_source_label(getattr(annotation, field, None), source_url)
+        if label:
+            return label, None
+    for field in ("original_url", "source_url", "uri"):
+        candidate = getattr(annotation, field, None)
+        if not isinstance(candidate, str) or not candidate.startswith(("http://", "https://")):
+            continue
+        if candidate == source_url or _is_grounding_redirect(candidate):
+            continue
+        host = urlsplit(candidate).hostname
+        if host:
+            return host.removeprefix("www."), candidate
+    generated = _clean_source_label(generated_labels.get(source_url), source_url)
+    if generated:
+        return generated, None
+    if not _is_grounding_redirect(source_url):
+        host = urlsplit(source_url).hostname
+        if host:
+            return host.removeprefix("www."), None
+    return None, None
+
+
+def _provider_generated_source_labels(interaction: Any) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    texts = [getattr(interaction, "output_text", None)]
+    for step in getattr(interaction, "steps", None) or []:
+        texts.extend(getattr(content, "text", None) for content in getattr(step, "content", None) or [])
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for label, url in _MARKDOWN_LINK_PATTERN.findall(text):
+            cleaned = _clean_source_label(label, url)
+            if cleaned:
+                labels.setdefault(url, cleaned)
+    return labels

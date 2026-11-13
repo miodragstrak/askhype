@@ -162,7 +162,62 @@ def test_ambiguous_citation_mapping_is_left_unmapped():
 def test_source_labels_are_clean_and_never_display_full_redirect_url():
     redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/very-long-token"
     assert _clean_source_label("Relevant article", redirect) == "Relevant article"
-    assert _clean_source_label(redirect, redirect) == "vertexaisearch.cloud.google.com"
+    assert _clean_source_label(redirect, redirect) is None
+    assert _clean_source_label("vertexaisearch.cloud.google.com", redirect) is None
+
+
+def test_grounding_redirect_uses_provider_title_and_preserves_href():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-token"
+    annotation = SimpleNamespace(url=redirect, title="Anthropic research", start_index=None, end_index=None)
+    interaction = SimpleNamespace(output_text="Report", steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=[annotation])])])
+    source = _extract_sources(interaction)[0]
+    assert source.display_label == "Anthropic research"
+    assert str(source.url) == redirect
+
+
+def test_grounding_redirect_uses_provider_publisher_metadata():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-token"
+    annotation = SimpleNamespace(url=redirect, title=None, publisher="openai.com", start_index=None, end_index=None)
+    interaction = SimpleNamespace(output_text="Report", steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=[annotation])])])
+    source = _extract_sources(interaction)[0]
+    assert source.display_label == "openai.com"
+    assert str(source.url) == redirect
+
+
+def test_grounding_redirect_uses_exact_provider_generated_markdown_label():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-token"
+    annotation = SimpleNamespace(url=redirect, title=None, start_index=None, end_index=None)
+    interaction = SimpleNamespace(
+        output_text=f"Sources:\n- [medium.com]({redirect})",
+        steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=[annotation])])],
+    )
+    source = _extract_sources(interaction)[0]
+    assert source.display_label == "medium.com"
+    assert str(source.url) == redirect
+
+
+def test_grounding_redirect_without_metadata_has_numbered_ui_fallback_data():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/opaque-secret-token"
+    annotation = SimpleNamespace(url=redirect, title=None, start_index=None, end_index=None)
+    interaction = SimpleNamespace(output_text="Report", steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=[annotation])])])
+    source = _extract_sources(interaction)[0]
+    assert source.display_label is None
+    assert source.title == ""
+    assert source.original_url is None
+    assert "opaque-secret-token" not in (source.display_label or source.title)
+
+
+def test_normal_source_uses_hostname_and_exact_url_deduplication():
+    url = "https://firecrawl.dev/blog/agents"
+    annotations = [
+        SimpleNamespace(url=url, title=None, start_index=None, end_index=None),
+        SimpleNamespace(url=url, title=None, start_index=None, end_index=None),
+    ]
+    interaction = SimpleNamespace(output_text="Report", steps=[SimpleNamespace(content=[SimpleNamespace(text="Report", annotations=annotations)])])
+    sources = _extract_sources(interaction)
+    assert len(sources) == 1
+    assert sources[0].display_label == "firecrawl.dev"
+    assert str(sources[0].url) == url
 
 
 def test_summary_is_concise_and_not_duplicated_as_first_section():

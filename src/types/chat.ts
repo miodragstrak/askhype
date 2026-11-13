@@ -15,7 +15,7 @@ export interface PendingDocument {
 export type DocumentAction = 'analyze' | 'transform' | 'presentation' | 'research';
 
 export interface ResearchSection { heading: string; content: string; }
-export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; citation_ids: number[]; }
+export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; citation_ids?: number[]; display_label?: string | null; original_url?: string | null; }
 export interface ResearchQuotaSnapshot { used: number; limit: number; remaining: number; reset_at: string; }
 export interface ResearchResult {
   research_id: string;
