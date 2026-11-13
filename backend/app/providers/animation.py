@@ -1,4 +1,7 @@
 import asyncio
+import copy
+import json
+import logging
 from typing import Any, Protocol
 
 from google.genai import types
@@ -27,9 +30,25 @@ from app.schemas.animations import (
 
 ANIMATION_PLANNING_INSTRUCTION = """Create one short, safe 2D cartoon animation plan.
 Return only the requested structured plan. Never return code, HTML, SVG, CSS, scripts, URLs, or executable content.
-Use only the controlled character, object, background, expression, color, and action values allowed by the schema.
+Allowed character types: person, child, robot, animal, creature.
+Allowed actions: enter_left, enter_right, exit_left, exit_right, move, wave, bounce, nod, shake, look_left, look_right, look_up, smile, surprised, speech, thought, appear, disappear.
+Map woman/man/adult (žena/muškarac/odrasla osoba) to person; boy/girl/kid/child (dečak/devojčica/dete) to child; dog/cat and other ordinary animals (pas/mačka) to animal.
+Map jump/hop/poskočiti to bounce. Use speech or thought for text bubbles, but omit the event when no actual bubble text is supplied by the user.
+Never invent action names or character types. Timeline target_id values must reference IDs declared in characters or objects.
+Use only the controlled character, object, background, expression, color, and action values allowed by the schema. Create exactly one scene.
 Keep the scene visually clear, use no more than three characters, and place events inside the total duration.
 Use Serbian text when the requested language is sr. Speech and thought text must be concise."""
+
+logger = logging.getLogger(__name__)
+
+CHARACTER_TYPE_ALIASES = {
+    "woman": "person", "man": "person", "adult": "person",
+    "boy": "child", "girl": "child", "kid": "child",
+    "dog": "animal", "cat": "animal",
+}
+ACTION_ALIASES = {
+    "jump": "bounce", "hop": "bounce", "wave_hand": "wave", "look_upward": "look_up",
+}
 
 
 class AnimationProvider(Protocol):
@@ -69,8 +88,30 @@ class GeminiAnimationProvider:
             max_output_tokens=self.settings.gemini_max_output_tokens,
         )
         contents = f"Requested language: {language}\nAnimation request:\n{prompt}"
+        response = await self._request(contents, config)
         try:
-            response = await self._gemini._generate_content(contents=contents, config=config)
+            return _validate_animation_response(response)
+        except ValidationError as exc:
+            _log_validation_failure(exc, self.provider_name, self.model, attempt=1)
+            if not _repairable_validation(exc):
+                raise AIAnimationPlanError("Gemini returned an invalid animation plan.") from exc
+            repair_contents = _repair_contents(contents, exc)
+            repaired = await self._request(repair_contents, config)
+            try:
+                return _validate_animation_response(repaired)
+            except ValidationError as repair_exc:
+                _log_validation_failure(repair_exc, self.provider_name, self.model, attempt=2)
+                raise AIAnimationPlanError("Gemini returned an invalid animation plan after repair.") from repair_exc
+            except (ValueError, TypeError) as repair_exc:
+                _log_response_shape_failure(self.provider_name, self.model, attempt=2)
+                raise AIAnimationPlanError("Gemini returned malformed animation data after repair.") from repair_exc
+        except (ValueError, TypeError) as exc:
+            _log_response_shape_failure(self.provider_name, self.model, attempt=1)
+            raise AIAnimationPlanError("Gemini returned malformed animation data.") from exc
+
+    async def _request(self, contents: str, config: types.GenerateContentConfig) -> Any:
+        try:
+            return await self._gemini._generate_content(contents=contents, config=config)
         except TimeoutError as exc:
             raise AIProviderTimeoutError("Animation provider timed out.") from exc
         except asyncio.CancelledError:
@@ -84,18 +125,89 @@ class GeminiAnimationProvider:
                 raise AIProviderResponseError("Animation request schema was rejected.") from exc
             raise AIProviderUnavailableError("Animation provider is unavailable.") from exc
 
-        parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, BaseModel):
-            parsed = parsed.model_dump()
-        try:
-            envelope = (
-                AnimationPlanEnvelope.model_validate(parsed)
-                if isinstance(parsed, dict)
-                else AnimationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
-            )
-        except (ValidationError, ValueError, TypeError) as exc:
-            raise AIAnimationPlanError("Gemini returned an invalid animation plan.") from exc
-        return envelope.plan
+
+def normalize_animation_payload(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(value)
+    plan = normalized.get("plan")
+    if not isinstance(plan, dict):
+        return normalized
+    characters = plan.get("characters")
+    if isinstance(characters, list):
+        for character in characters:
+            if not isinstance(character, dict) or not isinstance(character.get("type"), str):
+                continue
+            character_type = character["type"].strip().casefold()
+            character["type"] = CHARACTER_TYPE_ALIASES.get(character_type, character["type"])
+    timeline = plan.get("timeline")
+    if isinstance(timeline, list):
+        kept: list[Any] = []
+        for event in timeline:
+            if not isinstance(event, dict):
+                kept.append(event)
+                continue
+            action = event.get("action")
+            if isinstance(action, str):
+                action_key = action.strip().casefold()
+                event["action"] = ACTION_ALIASES.get(action_key, action)
+            if event.get("action") in {"speech", "thought"}:
+                parameters = event.get("parameters")
+                text = parameters.get("text") if isinstance(parameters, dict) else None
+                if not isinstance(text, str) or not text.strip():
+                    continue
+            kept.append(event)
+        plan["timeline"] = kept
+    return normalized
+
+
+def _validate_animation_response(response: Any) -> AnimationPlan:
+    parsed = getattr(response, "parsed", None)
+    if isinstance(parsed, BaseModel):
+        parsed = parsed.model_dump()
+    if parsed is None:
+        parsed = json.loads(getattr(response, "text", ""))
+    if not isinstance(parsed, dict):
+        raise TypeError("Animation response must be an object.")
+    return AnimationPlanEnvelope.model_validate(normalize_animation_payload(parsed)).plan
+
+
+def _repairable_validation(exc: ValidationError) -> bool:
+    return bool(exc.errors()) and all(error.get("type") != "json_invalid" for error in exc.errors())
+
+
+def _repair_contents(contents: str, exc: ValidationError) -> str:
+    feedback = [
+        {"path": ".".join(str(part) for part in error["loc"]), "category": error["type"]}
+        for error in exc.errors()[:12]
+    ]
+    return (
+        f"{contents}\n\nThe previous plan failed strict validation. Repair it once and return a complete replacement plan.\n"
+        f"Validation feedback: {json.dumps(feedback, separators=(',', ':'))}\n"
+        "Use only the allowed schema enums, declared target IDs, one scene, and grounded bubble text. Do not add code or new action/type values."
+    )
+
+
+def _value_shape(value: Any) -> str:
+    if isinstance(value, str): return f"string(length={len(value)})"
+    if isinstance(value, list): return f"array(length={len(value)})"
+    if isinstance(value, dict): return f"object(fields={len(value)})"
+    return type(value).__name__
+
+
+def _log_validation_failure(exc: ValidationError, provider: str, model: str, *, attempt: int) -> None:
+    errors = [{
+        "category": error["type"],
+        "path": ".".join(str(part) for part in error["loc"]),
+        "value_shape": _value_shape(error.get("input")),
+    } for error in exc.errors()[:12]]
+    logger.warning("Animation plan validation failed: %s", {
+        "provider": provider, "model": model, "attempt": attempt, "errors": errors,
+    })
+
+
+def _log_response_shape_failure(provider: str, model: str, *, attempt: int) -> None:
+    logger.warning("Animation response shape invalid: %s", {
+        "provider": provider, "model": model, "attempt": attempt, "category": "malformed_response",
+    })
 
 
 class MockAnimationProvider:

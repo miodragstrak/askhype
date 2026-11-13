@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -9,8 +10,12 @@ from pydantic import ValidationError
 from app.api.dependencies import get_animation_provider, get_animation_repository, get_authenticated_identity
 from app.auth.identity import RequestIdentity
 from app.main import app
-from app.providers.animation import GeminiAnimationProvider, MockAnimationProvider, prepare_gemini_animation_schema
-from app.providers.exceptions import AIProviderRateLimitError, AIProviderUnavailableError
+from app.providers.animation import (
+    ACTION_ALIASES, ANIMATION_PLANNING_INSTRUCTION, CHARACTER_TYPE_ALIASES,
+    GeminiAnimationProvider, MockAnimationProvider, normalize_animation_payload,
+    prepare_gemini_animation_schema,
+)
+from app.providers.exceptions import AIAnimationPlanError, AIProviderRateLimitError, AIProviderUnavailableError
 from app.repositories.animation_repository import AnimationLimitReached, InMemoryAnimationUsageRepository
 from app.schemas.animations import AnimationPlan
 from app.services.animation_generation import AnimationGenerationService
@@ -22,6 +27,9 @@ def _plan() -> AnimationPlan:
 
 def _identity() -> RequestIdentity:
     return RequestIdentity("authenticated", uuid4(), None, "free", "person@example.com")
+
+
+_VALID_ENVELOPE = {"plan": _plan().model_dump()}
 
 
 def test_strict_animation_plan_limits_and_targets():
@@ -59,6 +67,124 @@ def test_gemini_provider_validates_structured_plan():
         provider._gemini._generate_content = response
         assert (await provider.generate_plan("Scena", "sr")).title
     asyncio.run(run())
+
+
+def _envelope() -> dict:
+    return copy.deepcopy(_VALID_ENVELOPE)
+
+
+def test_obvious_character_and_action_aliases_are_normalized():
+    payload = _envelope()
+    payload["plan"]["characters"][0]["type"] = "woman"
+    payload["plan"]["characters"][1]["type"] = "dog"
+    payload["plan"]["timeline"][0]["action"] = "jump"
+    normalized = normalize_animation_payload(payload)
+    assert normalized["plan"]["characters"][0]["type"] == "person"
+    assert normalized["plan"]["characters"][1]["type"] == "animal"
+    assert normalized["plan"]["timeline"][0]["action"] == "bounce"
+    assert CHARACTER_TYPE_ALIASES["girl"] == "child"
+    assert ACTION_ALIASES["look_upward"] == "look_up"
+
+
+def test_existing_valid_plan_is_unchanged_by_normalization():
+    payload = _envelope()
+    assert normalize_animation_payload(payload) == payload
+
+
+def test_unknown_character_and_action_remain_rejected_after_normalization():
+    payload = _envelope()
+    payload["plan"]["characters"][0]["type"] = "wizard"
+    with pytest.raises(ValidationError):
+        AnimationPlan.model_validate(normalize_animation_payload(payload)["plan"])
+    payload = _envelope()
+    payload["plan"]["timeline"][0]["action"] = "fly_around"
+    with pytest.raises(ValidationError):
+        AnimationPlan.model_validate(normalize_animation_payload(payload)["plan"])
+
+
+def test_speech_without_grounded_text_is_omitted_not_invented():
+    payload = _envelope()
+    payload["plan"]["timeline"].append({
+        "start": 1, "duration": 1, "target_id": "child", "action": "speech", "parameters": {},
+    })
+    normalized = normalize_animation_payload(payload)
+    assert not any(event["action"] == "speech" for event in normalized["plan"]["timeline"])
+    AnimationPlan.model_validate(normalized["plan"])
+
+
+def test_serbian_natural_language_regression_maps_to_valid_controlled_plan():
+    async def run():
+        payload = _envelope()
+        first, second = payload["plan"]["characters"]
+        first.update(id="woman", name="Žena", type="woman")
+        second.update(id="child", name="Dete", type="girl")
+        dog = {**second, "id": "dog", "name": "Pas", "type": "dog"}
+        payload["plan"]["characters"] = [first, second, dog]
+        payload["plan"]["timeline"] = [
+            {"start": 0, "duration": 2, "target_id": "woman", "action": "enter_left", "parameters": {}},
+            {"start": 2, "duration": 2, "target_id": "woman", "action": "wave_hand", "parameters": {}},
+            {"start": 2, "duration": 2, "target_id": "child", "action": "jump", "parameters": {}},
+            {"start": 4, "duration": 2, "target_id": "dog", "action": "look_upward", "parameters": {}},
+            {"start": 6, "duration": 1, "target_id": "child", "action": "speech", "parameters": {}},
+        ]
+        provider = GeminiAnimationProvider(client=SimpleNamespace())
+        calls = []
+        async def response(**kwargs):
+            calls.append(kwargs["contents"])
+            return SimpleNamespace(parsed=payload, text="")
+        provider._gemini._generate_content = response
+        prompt = "Žena ulazi sa leve strane, maše detetu, dete poskoči od sreće, pas pogleda nagore, a onda se pojavi balon sa tekstom."
+        plan = await provider.generate_plan(prompt, "sr")
+        assert [item.type for item in plan.characters] == ["person", "child", "animal"]
+        assert [event.action for event in plan.timeline] == ["enter_left", "wave", "bounce", "look_up"]
+        assert len(calls) == 1
+    asyncio.run(run())
+
+
+def test_provider_instructions_enumerate_and_explain_controlled_mapping():
+    assert "Allowed character types: person, child, robot, animal, creature" in ANIMATION_PLANNING_INSTRUCTION
+    assert "woman/man/adult" in ANIMATION_PLANNING_INSTRUCTION
+    assert "jump/hop/poskočiti to bounce" in ANIMATION_PLANNING_INSTRUCTION
+    assert "Never invent action names or character types" in ANIMATION_PLANNING_INSTRUCTION
+
+
+def test_one_repair_attempt_recovers_invalid_provider_plan():
+    async def run():
+        invalid = _envelope()
+        invalid["plan"]["timeline"][0]["action"] = "leap"
+        valid = _envelope()
+        responses = [invalid, valid]
+        provider = GeminiAnimationProvider(client=SimpleNamespace())
+        calls = []
+        async def response(**kwargs):
+            calls.append(kwargs["contents"])
+            return SimpleNamespace(parsed=responses.pop(0), text="")
+        provider._gemini._generate_content = response
+        result = await provider.generate_plan("Scena", "sr")
+        assert result.title and len(calls) == 2
+        assert "Validation feedback" in calls[1]
+        assert "literal_error" in calls[1]
+    asyncio.run(run())
+
+
+def test_repair_failure_stops_after_two_calls_and_exposes_no_raw_content(caplog):
+    async def run():
+        invalid = _envelope()
+        invalid["plan"]["timeline"][0]["action"] = "secret-raw-provider-content"
+        provider = GeminiAnimationProvider(client=SimpleNamespace())
+        calls = 0
+        async def response(**kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(parsed=invalid, text="")
+        provider._gemini._generate_content = response
+        with pytest.raises(AIAnimationPlanError, match="after repair") as captured:
+            await provider.generate_plan("Scena", "sr")
+        assert calls == 2
+        assert "secret-raw-provider-content" not in str(captured.value)
+    caplog.set_level("WARNING")
+    asyncio.run(run())
+    assert "secret-raw-provider-content" not in caplog.text
 
 
 def test_failed_generation_does_not_consume_animation_quota():
