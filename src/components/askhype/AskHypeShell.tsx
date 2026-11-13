@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, runResearch, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, runResearch, sendAnimationGeneration, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
 import type { ChatResponse, DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
@@ -118,7 +118,17 @@ export const AskHypeShell = () => {
 
     try {
       let result;
-      if (documentAction === 'research') {
+      if (documentAction === 'animation') {
+        const animation = await sendAnimationGeneration(prompt, { accessToken: session?.access_token });
+        const data: ChatResponse = {
+          conversation_id: conversation.serverConversationId || `animation_${animation.animation_id}`,
+          provider: animation.provider, answer_type: 'animation_generation',
+          summary: `Animacija „${animation.title}” je spremna.`, recommendations: [],
+          follow_up_actions: [], sources: [], generated_at: animation.generated_at,
+          animation: animation.plan, animation_quota_remaining: animation.quota.remaining,
+        };
+        result = { data, usage: null };
+      } else if (documentAction === 'research') {
         const job = await runResearch(prompt, document?.file ?? null, { accessToken: session?.access_token });
         if (!job.result) throw new Error('Deep Research nije vratio rezultat.');
         const data: ChatResponse = {

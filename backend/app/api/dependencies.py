@@ -19,10 +19,27 @@ from app.repositories.profile_repository import (
 from app.services.usage_service import UsageService
 from app.repositories.research_repository import InMemoryResearchRepository, SupabaseResearchRepository, ResearchRepository
 from app.providers.research import GeminiResearchProvider, ResearchProvider
+from app.providers.animation import AnimationProvider, GeminiAnimationProvider, MockAnimationProvider
+from app.repositories.animation_repository import (
+    AnimationUsageRepository, InMemoryAnimationUsageRepository, SupabaseAnimationUsageRepository,
+)
 
 _memory_usage_repository = InMemoryUsageRepository()
 _memory_profile_repository = InMemoryProfileRepository()
 _memory_research_repository = InMemoryResearchRepository()
+_memory_animation_repository = InMemoryAnimationUsageRepository()
+
+
+async def get_animation_repository() -> AnimationUsageRepository:
+    if settings.quota_enforcement_enabled:
+        return SupabaseAnimationUsageRepository()
+    return _memory_animation_repository
+
+
+async def get_animation_provider() -> AnimationProvider:
+    if settings.ai_provider == "gemini":
+        return GeminiAnimationProvider()
+    return MockAnimationProvider()
 
 
 async def get_research_repository() -> ResearchRepository:

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, FileSearch, FileText, ImagePlus, Presentation, X } from 'lucide-react';
+import { ArrowUp, FileSearch, FileText, ImagePlus, Presentation, Sparkles, X } from 'lucide-react';
 import type { DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 
 const hasPresentationIntent = (value: string): boolean => {
@@ -68,6 +68,10 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       setValidationError('Deep Research podržava pitanje i najviše jedan dokument, ne slike.');
       return;
     }
+    if (selectedAction === 'animation' && (images.length || document)) {
+      setValidationError('Animacije se trenutno prave samo iz tekstualnog opisa.');
+      return;
+    }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
     if (await onSubmit(prompt, images, document, selectedAction)) {
       setValue('');
@@ -83,6 +87,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     if (!files) return;
     if (documentAction === 'presentation') return setValidationError('Slike nisu podržane kao izvor za prezentaciju.');
     if (documentAction === 'research') return setValidationError('Slike nisu podržane za Deep Research.');
+    if (documentAction === 'animation') return setValidationError('Animacije se trenutno prave samo iz tekstualnog opisa.');
     if (document) return setValidationError('Ukloni dokument pre dodavanja slika.');
     const selected = [...files];
     if (images.length + selected.length > 3) return setValidationError('Možeš poslati najviše 3 slike u jednoj poruci.');
@@ -116,6 +121,13 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   return (
     <div className="rounded-2xl border border-chat-outline bg-[var(--app-composer)] p-2 shadow-[0_8px_30px_rgba(21,35,84,0.08)] focus-within:border-hype-yellow focus-within:ring-2 focus-within:ring-hype-yellow">
       {!document && <div className="flex items-center justify-end gap-1 px-1 pb-1">
+        <button
+          type="button"
+          onClick={() => { selectDocumentAction(documentActionRef.current === 'animation' ? 'analyze' : 'animation'); images.forEach((image) => URL.revokeObjectURL(image.previewUrl)); setImages([]); setValidationError(null); }}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${documentAction === 'animation' ? 'bg-hype-blue text-white' : 'text-chat-muted hover:bg-chat-hover hover:text-chat-text'}`}
+        >
+          <Sparkles size={14} /> Napravi animaciju
+        </button>
         <button
           type="button"
           onClick={() => { selectDocumentAction(documentActionRef.current === 'research' ? 'analyze' : 'research'); setValidationError(null); }}
@@ -159,11 +171,14 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       {documentAction === 'research' && (
         <p className="px-2 pb-1 text-[11px] text-chat-muted">Deep Research koristi zaseban dnevni limit tokom beta testiranja.</p>
       )}
+      {documentAction === 'animation' && (
+        <p className="px-2 pb-1 text-[11px] text-chat-muted">Animacije su trenutno u beta verziji. Koriste zaseban dnevni limit.</p>
+      )}
       <div className="flex items-end gap-2">
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
         <input ref={documentInputRef} type="file" accept=".pdf,.docx,.xlsx,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => { selectDocument(event.target.files); event.target.value = ''; }}/>
-        <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} aria-label="Dodaj slike" title="Dodaj slike" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover"><ImagePlus size={19}/></button>
-        <button type="button" disabled={disabled} onClick={() => documentInputRef.current?.click()} aria-label="Dodaj dokument" title="Documents — dodaj PDF, Word, Excel ili CSV" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover"><FileText size={19}/></button>
+        <button type="button" disabled={disabled || documentAction === 'animation'} onClick={() => inputRef.current?.click()} aria-label="Dodaj slike" title="Dodaj slike" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus size={19}/></button>
+        <button type="button" disabled={disabled || documentAction === 'animation'} onClick={() => documentInputRef.current?.click()} aria-label="Dodaj dokument" title="Documents — dodaj PDF, Word, Excel ili CSV" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><FileText size={19}/></button>
         <textarea
           ref={textareaRef}
           value={value}
@@ -184,7 +199,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           autoFocus={autoFocus}
           disabled={disabled}
           aria-label="Poruka za AskHype"
-          placeholder={documentAction === 'research' ? 'Postavi pitanje za dubinsko istraživanje...' : documentAction === 'presentation' ? 'Opiši PowerPoint prezentaciju...' : documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
+          placeholder={documentAction === 'animation' ? 'Opiši kratku animiranu scenu...' : documentAction === 'research' ? 'Postavi pitanje za dubinsko istraživanje...' : documentAction === 'presentation' ? 'Opiši PowerPoint prezentaciju...' : documentAction === 'transform' ? 'Opiši željenu Excel izmenu...' : document ? 'Pitanje o dokumentu...' : 'Pitaj...'}
           className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-6 text-chat-text outline-none placeholder:text-chat-muted disabled:cursor-not-allowed disabled:text-chat-muted"
         />
         <button

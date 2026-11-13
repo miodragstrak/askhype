@@ -28,3 +28,7 @@ class AITransformationPlanError(AIProviderResponseError):
 
 class AIPresentationPlanError(AIProviderResponseError):
     """The provider did not produce a safe, supported presentation plan."""
+
+
+class AIAnimationPlanError(AIProviderResponseError):
+    """The provider did not produce a safe, supported animation plan."""

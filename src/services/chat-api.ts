@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import type { ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage, ResearchJob } from '../types/chat';
+import type { AnimationResponse, ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage, ResearchJob } from '../types/chat';
 import { getAnonymousId } from '../utils/anonymous-id';
 
 interface BackendValidationError {
@@ -82,6 +82,40 @@ export class ResearchApiError extends ApiError {
     this.code = code;
   }
 }
+
+export class AnimationApiError extends ApiError {
+  code: string;
+  constructor(message: string, status: number, code: string) {
+    super(message, status); this.name = 'AnimationApiError'; this.code = code;
+  }
+}
+
+export const sendAnimationGeneration = async (
+  prompt: string, options: ApiRequestOptions = {},
+): Promise<AnimationResponse> => {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/animations/generate`, {
+      method: 'POST', headers: { ...authHeaders(options.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, language: 'sr' }), signal: options.signal,
+    });
+  } catch {
+    throw new AnimationApiError('Servis za animacije trenutno nije dostupan. Pokušajte ponovo kasnije.', 0, 'animation_failed');
+  }
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    const detail = payload?.detail;
+    if (detail && typeof detail === 'object') {
+      const value = detail as { code?: unknown; message?: unknown };
+      if (typeof value.code === 'string' && typeof value.message === 'string') {
+        throw new AnimationApiError(value.message, response.status, value.code);
+      }
+    }
+    throw new AnimationApiError(getErrorMessage(response.status, payload), response.status, 'animation_failed');
+  }
+  return response.json();
+};
 
 const researchError = (response: Response, payload: BackendValidationError | null): ResearchApiError => {
   const detail = payload?.detail;

@@ -12,7 +12,18 @@ export interface PendingDocument {
   file: File;
 }
 
-export type DocumentAction = 'analyze' | 'transform' | 'presentation' | 'research';
+export type DocumentAction = 'analyze' | 'transform' | 'presentation' | 'research' | 'animation';
+
+export type AnimationAction = 'enter_left' | 'enter_right' | 'exit_left' | 'exit_right' | 'move' | 'wave' | 'bounce' | 'nod' | 'shake' | 'look_left' | 'look_right' | 'look_up' | 'smile' | 'surprised' | 'speech' | 'thought' | 'appear' | 'disappear';
+export interface AnimationPlan {
+  title: string;
+  duration_seconds: number;
+  background: { type: 'park' | 'room' | 'street' | 'office' | 'school' | 'space' | 'abstract'; description: string; palette: string };
+  characters: Array<{ id: string; type: 'person' | 'child' | 'robot' | 'animal' | 'creature'; name: string; x: number; y: number; scale: number; expression: string; appearance: { body_color: string; accent_color: string; hair_style: string; accessory: string } }>;
+  objects: Array<{ id: string; type: 'rocket' | 'tree' | 'bench' | 'ball' | 'star' | 'cloud' | 'flower' | 'book' | 'computer' | 'vehicle'; x: number; y: number; scale: number; color: string; label?: string | null }>;
+  timeline: Array<{ start: number; duration: number; target_id: string; action: AnimationAction; parameters: { x?: number | null; y?: number | null; text?: string | null } }>;
+}
+export interface AnimationResponse { animation_id: string; title: string; plan: AnimationPlan; generated_at: string; provider: string; model: string; quota: ResearchQuotaSnapshot }
 
 export interface ResearchSection { heading: string; content: string; }
 export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; citation_ids?: number[]; display_label?: string | null; original_url?: string | null; }
@@ -85,6 +96,8 @@ export interface ChatResponse {
   presentation_slide_count?: number;
   research?: ResearchResult;
   research_quota_remaining?: number;
+  animation?: AnimationPlan;
+  animation_quota_remaining?: number;
 }
 
 export interface ChatRecommendation {

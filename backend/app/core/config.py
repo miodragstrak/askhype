@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     gemini_temperature: float = 0.4
     gemini_max_output_tokens: int = Field(default=4096, gt=0)
     gemini_research_model: str | None = None
+    gemini_animation_model: str | None = None
     research_daily_limit: int = Field(default=3, gt=0)
+    animation_daily_limit: int = Field(default=10, gt=0)
     research_max_depth: Literal["quick", "standard", "deep"] = "standard"
     quota_enforcement_enabled: bool = False
     supabase_url: str | None = None

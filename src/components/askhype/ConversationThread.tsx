@@ -4,6 +4,7 @@ import type { ChatResponse } from '../../types/chat';
 import type { LocalMessage } from '../../types/conversation';
 import { ResearchMarkdown } from './ResearchMarkdown';
 import { cleanResearchSourceLabel } from './research-display';
+import { AnimationPreview } from './AnimationPreview';
 
 interface ConversationThreadProps {
   messages: LocalMessage[];
@@ -47,7 +48,9 @@ const AssistantResponse = ({
   });
   return (
   <div className="space-y-5 lg:space-y-6">
-    {!response.research && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
+    {!response.research && !response.animation && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
+
+    {response.animation && <AnimationPreview plan={response.animation} remaining={response.animation_quota_remaining} />}
 
     {response.research ? (
       <div className="space-y-6">
