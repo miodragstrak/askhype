@@ -1,6 +1,7 @@
 import { Download, ExternalLink, FileText, Loader2, LockKeyhole, MapPin, RefreshCcw } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { QuotaLimitPayload } from '../../services/chat-api';
-import type { ChatResponse } from '../../types/chat';
+import type { ChatResponse, ResearchSource } from '../../types/chat';
 import type { LocalMessage } from '../../types/conversation';
 
 interface ConversationThreadProps {
@@ -28,6 +29,45 @@ const hypeSourceOwner = (url: string): string | null => {
   return null;
 };
 
+const cleanResearchSourceLabel = (source: ResearchSource): string => {
+  const title = source.title.trim();
+  if (title && !/^https?:\/\//i.test(title) && !title.includes('grounding-api-redirect')) return title;
+  const publisher = source.publisher?.trim();
+  if (publisher && !publisher.includes('grounding-api-redirect')) return publisher.replace(/^www\./, '');
+  try {
+    const host = new URL(source.url).hostname.replace(/^www\./, '');
+    return host.includes('grounding-api-redirect') ? 'Google izvor' : host;
+  } catch {
+    return 'Izvor';
+  }
+};
+
+const renderResearchText = (text: string, sources: ResearchSource[]): ReactNode[] => {
+  const citationPattern = /\[cite:\s*([0-9]+(?:\s*,\s*[0-9]+)*)\]/gi;
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(citationPattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+    const ids = match[1].split(',').map((value) => Number(value.trim()));
+    nodes.push(...ids.map((id) => {
+      const matches = sources.filter((source) => source.citation_ids.includes(id));
+      if (matches.length !== 1) return <span key={`${index}-${id}`}>[cite: {id}]</span>;
+      const source = matches[0];
+      return (
+        <a key={`${index}-${id}`} href={source.url} target="_blank" rel="noreferrer"
+          aria-label={`Otvori izvor ${id}: ${cleanResearchSourceLabel(source)}`}
+          className="mx-0.5 inline-flex rounded px-1 text-xs font-semibold text-hype-blue underline decoration-chat-outline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-hype-yellow">
+          [{id}]
+        </a>
+      );
+    }));
+    cursor = index + match[0].length;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+};
+
 const AssistantResponse = ({
   response,
   onFollowUp,
@@ -36,25 +76,58 @@ const AssistantResponse = ({
   response: ChatResponse;
   onFollowUp: (prompt: string) => void;
   disabled: boolean;
-}) => (
+}) => {
+  const researchSections = response.research?.sections.filter((section, index) => {
+    if (index !== 0) return true;
+    const summary = response.research?.summary.replace(/\s+/g, ' ').trim();
+    const content = section.content.replace(/\s+/g, ' ').trim();
+    return content !== summary;
+  });
+  return (
   <div className="space-y-5 lg:space-y-6">
-    <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>
+    {!response.research && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
 
     {response.research ? (
-      <div className="space-y-5">
+      <div className="space-y-6">
         <h2 className="text-xl font-semibold text-chat-text">{response.research.title}</h2>
-        {response.research.sections.map((section, index) => (
-          <section key={`${section.heading}-${index}`} className="space-y-2">
-            <h3 className="text-base font-semibold text-chat-text">{section.heading}</h3>
-            <p className="whitespace-pre-wrap text-sm leading-7 text-chat-text">{section.content}</p>
+        <section className="space-y-2">
+          <h3 className="text-base font-semibold text-chat-text">Kratak odgovor</h3>
+          <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{renderResearchText(response.research.summary, response.research.sources)}</p>
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-base font-semibold text-chat-text">Detaljno istraživanje</h3>
+          {researchSections?.map((section, index) => (
+            <div key={`${section.heading}-${index}`} className="space-y-2">
+              <h4 className="text-sm font-semibold text-chat-text">{section.heading}</h4>
+              <p className="whitespace-pre-wrap text-sm leading-7 text-chat-text">{renderResearchText(section.content, response.research!.sources)}</p>
+            </div>
+          ))}
+        </section>
+        {response.research.sources.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-base font-semibold text-chat-text">Izvori</h3>
+            <ol className="space-y-2 text-xs text-chat-muted">
+              {response.research.sources.map((source, index) => (
+                <li key={source.url} className="flex gap-2">
+                  <span className="w-8 flex-none text-right">{source.citation_ids.length ? source.citation_ids.join(',') : index + 1}.</span>
+                  <a href={source.url} target="_blank" rel="noreferrer"
+                    className="inline-flex min-w-0 items-center gap-1 underline decoration-chat-outline underline-offset-4 hover:text-chat-text">
+                    <span className="truncate">{cleanResearchSourceLabel(source)}</span><ExternalLink size={11} className="flex-none" />
+                  </a>
+                </li>
+              ))}
+            </ol>
           </section>
-        ))}
+        )}
         {response.research.limitations.length > 0 ? (
           <div className="rounded-lg border border-chat-border bg-chat-elevated p-3 text-xs leading-5 text-chat-muted">
             <span className="font-semibold text-chat-text">Ograničenja: </span>
             {response.research.limitations.join(' ')}
           </div>
         ) : null}
+        {typeof response.research_quota_remaining === 'number' && (
+          <p className="text-[11px] text-chat-muted">Preostalo Deep Research zahteva danas: {response.research_quota_remaining}</p>
+        )}
       </div>
     ) : null}
 
@@ -112,7 +185,7 @@ const AssistantResponse = ({
       </div>
     )}
 
-    {response.sources.length > 0 && (
+    {!response.research && response.sources.length > 0 && (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-chat-muted">
         <span className="font-semibold text-chat-text">Izvori</span>
         {response.sources.map((source) =>
@@ -157,7 +230,8 @@ const AssistantResponse = ({
       </div>
     )}
   </div>
-);
+  );
+};
 
 const QuotaNotice = ({
   quota,

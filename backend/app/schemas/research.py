@@ -26,6 +26,14 @@ class ResearchSource(BaseModel):
     url: AnyHttpUrl
     publisher: str | None = None
     date: str | None = None
+    citation_ids: list[int] = Field(default_factory=list)
+
+
+class ResearchQuotaSnapshot(BaseModel):
+    used: int
+    limit: int
+    remaining: int
+    reset_at: datetime
 
 
 class ResearchResult(BaseModel):
@@ -48,10 +56,11 @@ class ResearchJobResponse(BaseModel):
     updated_at: datetime
     result: ResearchResult | None = None
     failure_category: str | None = None
+    quota: ResearchQuotaSnapshot | None = None
 
 
 class ResearchQuotaDetail(BaseModel):
-    code: Literal["research_limit_reached"] = "research_limit_reached"
+    code: Literal["daily_quota_reached"] = "daily_quota_reached"
     message: str = "Dnevni limit za Deep Research je dostignut."
     used: int
     limit: int

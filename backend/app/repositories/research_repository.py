@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -35,7 +35,13 @@ class SupabaseResearchRepository:
         row = _row(getattr(response, "data", None))
         if not row.get("allowed"):
             raise ResearchLimitReached(int(row["used"]), int(row["limit"]), _datetime(row["reset_at"]))
-        return await self.get(values["research_id"], values["user_id"]) or {}
+        job = await self.get(values["research_id"], values["user_id"]) or {}
+        job["_quota"] = {
+            "used": int(row["used"]), "limit": int(row["limit"]),
+            "remaining": max(int(row["limit"]) - int(row["used"]), 0),
+            "reset_at": _datetime(row["reset_at"]),
+        }
+        return job
 
     async def get(self, research_id: UUID, user_id: UUID) -> dict[str, Any] | None:
         response = (self.client.table("research_jobs").select("*")
@@ -63,10 +69,12 @@ class InMemoryResearchRepository:
         active = [job for job in self.jobs.values() if job["user_id"] == values["user_id"] and job["created_at"].date() == now.date()]
         if len(active) >= values["limit"]:
             reset = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            from datetime import timedelta
             raise ResearchLimitReached(len(active), values["limit"], reset + timedelta(days=1))
         row = {"id": values["research_id"], **values, "status": "queued", "result": None,
-               "failure_category": None, "created_at": now, "updated_at": now}
+               "failure_category": None, "created_at": now, "updated_at": now,
+               "_quota": {"used": len(active) + 1, "limit": values["limit"],
+                           "remaining": max(values["limit"] - len(active) - 1, 0),
+                           "reset_at": now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)}}
         self.jobs[values["research_id"]] = row
         return row
 

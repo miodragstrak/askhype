@@ -5,6 +5,10 @@ from uuid import UUID, uuid4
 from app.auth.identity import RequestIdentity
 from app.core.config import settings
 from app.providers.research import ResearchProvider
+from app.providers.exceptions import (
+    AIProviderConfigurationError, AIProviderRateLimitError, AIProviderResponseError,
+    AIProviderTimeoutError, AIProviderUnavailableError,
+)
 from app.repositories.research_repository import ResearchRepository
 from app.schemas.documents import ExtractedDocument
 from app.schemas.research import ResearchJobResponse, ResearchRequest, ResearchResult
@@ -32,13 +36,15 @@ class ResearchService:
             model=settings.gemini_research_model or "unconfigured", depth=request.depth,
             language=request.language, provider_job_id="pending", limit=settings.research_daily_limit,
         )
+        quota = row.get("_quota")
         try:
             started = await self.provider.start_research(request.query, request.language, request.depth, document)
-        except Exception:
-            await self.repository.update(research_id, status="failed", failure_category="provider_start_failed")
+        except Exception as exc:
+            await self.repository.update(research_id, status="failed", failure_category=_failure_category(exc))
             raise
         row = await self.repository.update(research_id, status=started.status,
                                            provider_job_id=started.provider_job_id)
+        row["_quota"] = quota
         return _response(row)
 
     async def get(self, research_id: UUID, identity: RequestIdentity) -> ResearchJobResponse:
@@ -49,7 +55,11 @@ class ResearchService:
             raise ResearchNotFound("Research not found.")
         if row["status"] in {"completed", "failed"}:
             return _response(row)
-        current = await self.provider.get_research(row["provider_job_id"], research_id)
+        try:
+            current = await self.provider.get_research(row["provider_job_id"], research_id)
+        except Exception as exc:
+            await self.repository.update(research_id, status="failed", failure_category=_failure_category(exc))
+            raise
         row = await self.repository.update(research_id, status=current.status,
                                            result=current.result, failure_category=current.failure_category)
         return _response(row)
@@ -61,4 +71,13 @@ def _response(row) -> ResearchJobResponse:
         research_id=row["id"], status=row["status"], created_at=row["created_at"],
         updated_at=row["updated_at"], result=ResearchResult.model_validate(result) if result else None,
         failure_category=row.get("failure_category"),
+        quota=row.get("_quota"),
     )
+
+
+def _failure_category(exc: Exception) -> str:
+    if isinstance(exc, AIProviderRateLimitError): return "provider_rate_limited"
+    if isinstance(exc, AIProviderUnavailableError): return "provider_unavailable"
+    if isinstance(exc, AIProviderTimeoutError): return "provider_timeout"
+    if isinstance(exc, (AIProviderResponseError, AIProviderConfigurationError)): return "invalid_request"
+    return "research_failed"

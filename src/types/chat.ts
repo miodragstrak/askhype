@@ -15,7 +15,8 @@ export interface PendingDocument {
 export type DocumentAction = 'analyze' | 'transform' | 'presentation' | 'research';
 
 export interface ResearchSection { heading: string; content: string; }
-export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; }
+export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; citation_ids: number[]; }
+export interface ResearchQuotaSnapshot { used: number; limit: number; remaining: number; reset_at: string; }
 export interface ResearchResult {
   research_id: string;
   status: 'completed';
@@ -35,6 +36,7 @@ export interface ResearchJob {
   updated_at: string;
   result?: ResearchResult | null;
   failure_category?: string | null;
+  quota?: ResearchQuotaSnapshot | null;
 }
 
 export interface TransformationDownload {
@@ -82,6 +84,7 @@ export interface ChatResponse {
   download?: TransformationDownload;
   presentation_slide_count?: number;
   research?: ResearchResult;
+  research_quota_remaining?: number;
 }
 
 export interface ChatRecommendation {

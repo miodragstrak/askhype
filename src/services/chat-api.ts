@@ -74,6 +74,26 @@ export class PromptLimitError extends ApiError {
   }
 }
 
+export class ResearchApiError extends ApiError {
+  code: string;
+  constructor(message: string, status: number, code: string) {
+    super(message, status);
+    this.name = 'ResearchApiError';
+    this.code = code;
+  }
+}
+
+const researchError = (response: Response, payload: BackendValidationError | null): ResearchApiError => {
+  const detail = payload?.detail;
+  if (detail && typeof detail === 'object') {
+    const value = detail as { code?: unknown; message?: unknown; limit?: unknown };
+    if (typeof value.code === 'string' && typeof value.message === 'string') {
+      return new ResearchApiError(value.message, response.status, value.code);
+    }
+  }
+  return new ResearchApiError(getErrorMessage(response.status, payload), response.status, 'research_failed');
+};
+
 const getErrorMessage = (status: number, payload: BackendValidationError | null): string => {
   if (status >= 400 && status < 500 && typeof payload?.detail === 'string') {
     return payload.detail;
@@ -362,12 +382,12 @@ export const startResearch = async (
       method: 'POST', headers: authHeaders(options.accessToken), body, signal: options.signal,
     });
   } catch {
-    throw new ApiError('Deep Research trenutno nije dostupan. Pokušaj ponovo.', 0);
+    throw new ResearchApiError('Deep Research servis trenutno nije dostupan. Pokušajte ponovo kasnije.', 0, 'provider_unavailable');
   }
   if (!response.ok) {
     let payload: BackendValidationError | null = null;
     try { payload = await response.json(); } catch { payload = null; }
-    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+    throw researchError(response, payload);
   }
   return response.json();
 };
@@ -375,13 +395,18 @@ export const startResearch = async (
 export const getResearch = async (
   researchId: string, options: ApiRequestOptions = {},
 ): Promise<ResearchJob> => {
-  const response = await fetch(`${API_BASE_URL}/api/research/${encodeURIComponent(researchId)}`, {
-    headers: authHeaders(options.accessToken), signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/research/${encodeURIComponent(researchId)}`, {
+      headers: authHeaders(options.accessToken), signal: options.signal,
+    });
+  } catch {
+    throw new ResearchApiError('Deep Research servis trenutno nije dostupan. Pokušajte ponovo kasnije.', 0, 'provider_unavailable');
+  }
   if (!response.ok) {
     let payload: BackendValidationError | null = null;
     try { payload = await response.json(); } catch { payload = null; }
-    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+    throw researchError(response, payload);
   }
   return response.json();
 };
@@ -390,11 +415,23 @@ export const runResearch = async (
   query: string, file: File | null, options: ApiRequestOptions = {},
 ): Promise<ResearchJob> => {
   let job = await startResearch(query, file, options);
+  const quota = job.quota;
   for (let poll = 0; poll < 360 && !['completed', 'failed'].includes(job.status); poll += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 10_000));
     job = await getResearch(job.research_id, options);
   }
-  if (job.status === 'failed') throw new ApiError('Deep Research nije uspeo. Pokušaj ponovo.', 502);
+  if (!job.quota && quota) job = { ...job, quota };
+  if (job.status === 'failed') {
+    const messages: Record<string, string> = {
+      provider_rate_limited: 'Deep Research servis je trenutno dostigao ograničenje provajdera. Pokušajte ponovo kasnije.',
+      provider_unavailable: 'Deep Research servis je trenutno preopterećen. Pokušajte ponovo kasnije.',
+      provider_timeout: 'Deep Research istraživanje je isteklo. Pokušajte ponovo kasnije.',
+      invalid_request: 'Deep Research zahtev nije moguće obraditi. Preformulišite pitanje.',
+      research_failed: 'Deep Research nije uspeo. Pokušajte ponovo kasnije.',
+    };
+    const code = job.failure_category || 'research_failed';
+    throw new ResearchApiError(messages[code] || messages.research_failed, 502, code);
+  }
   if (job.status !== 'completed' || !job.result) throw new ApiError('Deep Research je prekoračio dozvoljeno vreme.', 504);
   return job;
 };

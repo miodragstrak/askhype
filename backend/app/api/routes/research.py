@@ -7,7 +7,7 @@ from starlette.datastructures import UploadFile
 from app.api.dependencies import get_authenticated_identity, get_research_provider, get_research_repository
 from app.auth.identity import RequestIdentity
 from app.core.config import settings
-from app.providers.exceptions import AIProviderConfigurationError, AIProviderResponseError, AIProviderTimeoutError, AIProviderUnavailableError
+from app.providers.exceptions import AIProviderConfigurationError, AIProviderRateLimitError, AIProviderResponseError, AIProviderTimeoutError, AIProviderUnavailableError
 from app.providers.research import ResearchProvider
 from app.repositories.research_repository import ResearchLimitReached, ResearchRepository
 from app.schemas.research import ResearchJobResponse, ResearchQuotaDetail, ResearchRequest
@@ -25,18 +25,23 @@ async def start_research(request: Request, identity: RequestIdentity = Depends(g
     try:
         return await ResearchService(repository, provider).start(payload, identity, document)
     except ResearchLimitReached as exc:
-        detail = ResearchQuotaDetail(used=exc.used, limit=exc.limit, reset_at=exc.reset_at)
+        detail = ResearchQuotaDetail(
+            used=exc.used, limit=exc.limit, reset_at=exc.reset_at,
+            message=f"Dostigli ste dnevni limit za Deep Research ({exc.limit} zahteva). Možete nastaviti sa običnim AskHype razgovorom ili pokušati ponovo sutra.",
+        )
         raise HTTPException(429, detail=detail.model_dump(mode="json")) from exc
     except ResearchDepthNotAllowed as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     except AIProviderConfigurationError as exc:
-        raise HTTPException(503, detail="Deep Research nije konfigurisan.") from exc
+        raise HTTPException(503, detail={"code": "invalid_request", "message": "Deep Research trenutno nije pravilno konfigurisan."}) from exc
     except AIProviderTimeoutError as exc:
-        raise HTTPException(504, detail="Pokretanje istraživanja je isteklo.") from exc
+        raise HTTPException(504, detail={"code": "provider_timeout", "message": "Deep Research istraživanje je isteklo. Pokušajte ponovo kasnije."}) from exc
     except AIProviderUnavailableError as exc:
-        raise HTTPException(503, detail="Deep Research provider trenutno nije dostupan.") from exc
+        raise HTTPException(503, detail={"code": "provider_unavailable", "message": "Deep Research servis je trenutno preopterećen. Pokušajte ponovo kasnije."}) from exc
+    except AIProviderRateLimitError as exc:
+        raise HTTPException(503, detail={"code": "provider_rate_limited", "message": "Deep Research servis je trenutno dostigao ograničenje provajdera. Pokušajte ponovo kasnije."}) from exc
     except AIProviderResponseError as exc:
-        raise HTTPException(502, detail="Deep Research provider je vratio neispravan odgovor.") from exc
+        raise HTTPException(502, detail={"code": "invalid_request", "message": "Deep Research zahtev nije moguće obraditi. Preformulišite pitanje."}) from exc
 
 
 @router.get("/{research_id}", response_model=ResearchJobResponse)
@@ -48,13 +53,15 @@ async def get_research(research_id: UUID, identity: RequestIdentity = Depends(ge
     except ResearchNotFound as exc:
         raise HTTPException(404, detail="Istraživanje nije pronađeno.") from exc
     except AIProviderTimeoutError as exc:
-        raise HTTPException(504, detail="Provera istraživanja je istekla.") from exc
+        raise HTTPException(504, detail={"code": "provider_timeout", "message": "Deep Research istraživanje je isteklo. Pokušajte ponovo kasnije."}) from exc
     except AIProviderUnavailableError as exc:
-        raise HTTPException(503, detail="Deep Research provider trenutno nije dostupan.") from exc
+        raise HTTPException(503, detail={"code": "provider_unavailable", "message": "Deep Research servis je trenutno preopterećen. Pokušajte ponovo kasnije."}) from exc
+    except AIProviderRateLimitError as exc:
+        raise HTTPException(503, detail={"code": "provider_rate_limited", "message": "Deep Research servis je trenutno dostigao ograničenje provajdera. Pokušajte ponovo kasnije."}) from exc
     except AIProviderResponseError as exc:
-        raise HTTPException(502, detail="Rezultat istraživanja nije ispravan.") from exc
+        raise HTTPException(502, detail={"code": "research_failed", "message": "Deep Research nije uspeo. Pokušajte ponovo kasnije."}) from exc
     except AIProviderConfigurationError as exc:
-        raise HTTPException(503, detail="Deep Research nije konfigurisan.") from exc
+        raise HTTPException(503, detail={"code": "invalid_request", "message": "Deep Research trenutno nije pravilno konfigurisan."}) from exc
 
 
 async def _parse(request: Request):

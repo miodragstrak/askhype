@@ -127,6 +127,7 @@ export const AskHypeShell = () => {
           recommendations: [], follow_up_actions: [],
           sources: job.result.sources.map((source) => ({ title: source.title, url: source.url })),
           generated_at: job.result.generated_at, research: job.result,
+          research_quota_remaining: job.quota?.remaining,
         };
         result = { data, usage: null };
       } else if (documentAction === 'presentation') {

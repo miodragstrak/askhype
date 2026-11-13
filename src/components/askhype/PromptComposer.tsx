@@ -156,6 +156,9 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         </div>
       )}
       {validationError && <p className="px-2 pb-1 text-xs text-red-600">{validationError}</p>}
+      {documentAction === 'research' && (
+        <p className="px-2 pb-1 text-[11px] text-chat-muted">Deep Research koristi zaseban dnevni limit tokom beta testiranja.</p>
+      )}
       <div className="flex items-end gap-2">
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
         <input ref={documentInputRef} type="file" accept=".pdf,.docx,.xlsx,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => { selectDocument(event.target.files); event.target.value = ''; }}/>
