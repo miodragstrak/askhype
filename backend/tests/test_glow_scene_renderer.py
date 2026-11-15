@@ -170,3 +170,44 @@ def test_particle_field_is_deterministic_and_varies_size_and_opacity():
     assert first == second
     assert 'r="1"' in first or 'r="2"' in first
     assert 'opacity=".28"' in first or 'opacity=".38"' in first
+
+
+@pytest.mark.parametrize(
+    ("scene", "expected_family", "marker"),
+    [
+        ("Velika poslovna zgrada", "building", "building-scene"),
+        ("Moderan neboder noću", "building", "building-scene"),
+        ("Crveni automobil na putu", "vehicle", "vehicle-scene"),
+        ("Planine u magli", "landscape", None),
+        ("Plava apstraktna energija", "abstract", "abstract-scene"),
+    ],
+)
+def test_non_character_semantic_routing_has_no_mascot_face(scene, expected_family, marker):
+    rendered, sanitized = _sanitized(_direction(characters=[], scene=scene))
+    assert rendered.subject_families == ()
+    assert rendered.scene_family == expected_family
+    assert "creature-root" not in sanitized.content
+    assert "eye-blink" not in sanitized.content
+    if marker:
+        assert marker in sanitized.content
+    assert sanitized.element_count <= 100
+    assert validate_svg_quality(sanitized).passed
+
+
+def test_building_is_stable_with_facade_windows_and_no_character_motion():
+    rendered, sanitized = _sanitized(_direction(characters=[], scene="Velika poslovna zgrada noću"))
+    assert rendered.scene_family == "building"
+    assert "building-windows" in sanitized.content
+    root = ET.fromstring(sanitized.content)
+    assert all(not element.get("class", "").startswith("subject-") for element in root.iter())
+    assert sanitized.css_keyframes == 5
+
+
+def test_existing_character_families_still_route_to_character_templates():
+    cases = [
+        ([CHILD], "child"), ([DOG], "animal"), ([ROBOT], "robot"), ([CREATURE], "creature"),
+    ]
+    for characters, family in cases:
+        rendered = render_glow_scene(_direction(characters=characters))
+        assert rendered.scene_family == "characters"
+        assert rendered.subject_families == (family,)

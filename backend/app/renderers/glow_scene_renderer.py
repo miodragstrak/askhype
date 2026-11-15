@@ -28,6 +28,7 @@ _COLOR_NAMES = {
 class GlowSceneRender:
     svg: str
     subject_families: tuple[str, ...]
+    scene_family: str
 
 
 def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
@@ -37,7 +38,8 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
         *(f"{item.name} {item.description}" for item in direction.objects),
     ]))
     subjects = _subjects(direction, scene_text)[:MAX_PRIMARY_SUBJECTS]
-    positions = SUBJECT_POSITIONS[len(subjects)]
+    scene_family = "characters" if subjects else _scene_family(scene_text, bool(direction.objects))
+    positions = SUBJECT_POSITIONS[len(subjects)] if subjects else ()
 
     ET.register_namespace("", SVG_NS)
     root = ET.Element(_tag("svg"), {
@@ -58,7 +60,7 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
     trail = ET.SubElement(defs, _tag("filter"), {"id": "trailGlow", "x": "-40%", "y": "-40%", "width": "180%", "height": "180%"})
     ET.SubElement(trail, _tag("feDropShadow"), {"dx": "0", "dy": "0", "stdDeviation": "6", "flood-color": palette[3], "flood-opacity": ".65"})
     style = ET.SubElement(root, _tag("style"))
-    style.text = _STYLE
+    style.text = _scene_style(bool(subjects))
 
     ET.SubElement(root, _tag("rect"), {"width": "1280", "height": "720", "fill": "url(#sky)"})
     ET.SubElement(root, _tag("ellipse"), {"cx": "275", "cy": "180", "rx": "360", "ry": "245", "fill": "url(#atmosphereGlow)", "opacity": ".24", "class": "depth-back"})
@@ -78,8 +80,11 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
         })
         _render_subject(root, family, character, index, x, y, subject_color, accent)
 
+    if not subjects:
+        _render_non_character(root, scene_family, scene_text, palette)
+
     _foreground(root, scene_text, palette)
-    return GlowSceneRender(ET.tostring(root, encoding="unicode"), tuple(families))
+    return GlowSceneRender(ET.tostring(root, encoding="unicode"), tuple(families), scene_family)
 
 
 def _tag(name: str) -> str:
@@ -133,11 +138,26 @@ def _subjects(direction: ArtDirection, scene_text: str) -> list[tuple[str, ArtCh
         for family, character in result:
             if family == "generic" and missing:
                 family = missing.pop(0)
-            reconciled.append(("creature" if family == "generic" else family, character))
+            if family != "generic":
+                reconciled.append((family, character))
         result = reconciled
     if not result:
         result.extend((family, None) for family in expected)
-    return result or [("creature", None)]
+    return result
+
+
+def _scene_family(scene_text: str, has_objects: bool) -> str:
+    checks = (
+        ("building", ("zgrad", "building", "neboder", "skyscraper", "toranj", "tower", "architecture", "arhitektur")),
+        ("city", ("grad", "city", "skyline", "urban", "metropol")),
+        ("vehicle", ("automobil", "auto", "car", "vehicle", "vozilo", "motor", "train", "voz", "bicikl")),
+        ("landscape", ("planin", "mountain", "magl", "mist", "landscape", "prirod", "nature", "suma", "forest", "jezer", "lake", "more", "ocean")),
+        ("product", ("product", "proizvod", "predmet", "object", "telefon", "phone", "boca", "bottle", "sat", "watch", "stolica", "chair")),
+    )
+    for family, terms in checks:
+        if _has_any(scene_text, terms):
+            return family
+    return "product" if has_objects else "abstract"
 
 
 def _scene_families(scene_text: str) -> list[str]:
@@ -170,7 +190,7 @@ def _family(text: str) -> str:
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     tokens = re.findall(r"[a-z0-9]+", text)
-    exact = {"pas", "dog", "cat", "pup", "boy", "girl", "man", "tea"}
+    exact = {"pas", "dog", "cat", "pup", "boy", "girl", "man", "tea", "grad", "city", "car", "auto"}
     return any(
         token == term if term in exact else token.startswith(term)
         for term in terms
@@ -221,6 +241,91 @@ def _render_subject(
         ET.SubElement(group, _tag("circle"), {"cx": str(x - 30), "cy": str(y - 16), "r": "6", "fill": "#172342"})
         ET.SubElement(group, _tag("circle"), {"cx": str(x + 30), "cy": str(y - 16), "r": "6", "fill": "#172342"})
         ET.SubElement(group, _tag("path"), {"d": f"M{x-22} {y+24} Q{x} {y+42} {x+22} {y+24}", "fill": "none", "stroke": "#f7f3ff", "stroke-width": "6", "stroke-linecap": "round"})
+
+
+def _render_non_character(root: ET.Element, family: str, scene: str, palette: tuple[str, ...]) -> None:
+    if family == "building":
+        _render_building(root, palette)
+    elif family == "city":
+        _render_city(root, palette)
+    elif family == "vehicle":
+        _render_vehicle(root, palette)
+    elif family == "landscape":
+        _render_landscape(root, palette)
+    elif family == "product":
+        _render_product(root, palette)
+    else:
+        _render_abstract(root, palette)
+
+
+def _render_building(root: ET.Element, palette: tuple[str, ...]) -> None:
+    skyline = ET.SubElement(root, _tag("g"), {"id": "distant-skyline", "class": "depth-back", "opacity": ".34"})
+    for index, (x, width, height) in enumerate(((90, 120, 190), (225, 85, 260), (960, 105, 235), (1080, 125, 170))):
+        ET.SubElement(skyline, _tag("rect"), {"x": str(x), "y": str(585 - height), "width": str(width), "height": str(height), "rx": "10", "fill": palette[index % len(palette)]})
+    group = ET.SubElement(root, _tag("g"), {"id": "building-scene", "filter": "url(#rimGlow)"})
+    ET.SubElement(group, _tag("rect"), {"x": "405", "y": "575", "width": "470", "height": "62", "rx": "16", "fill": palette[1]})
+    ET.SubElement(group, _tag("polygon"), {"points": "475,145 790,115 810,575 455,575", "fill": "url(#subjectGlow)"})
+    ET.SubElement(group, _tag("polygon"), {"points": "790,115 865,175 875,575 810,575", "fill": palette[1], "opacity": ".82"})
+    ET.SubElement(group, _tag("polygon"), {"points": "475,145 790,115 760,155 500,180", "fill": palette[4], "opacity": ".2"})
+    windows = ET.SubElement(group, _tag("g"), {"id": "building-windows"})
+    for row in range(5):
+        for column in range(3):
+            ET.SubElement(windows, _tag("rect"), {
+                "x": str(520 + column * 82), "y": str(205 + row * 65), "width": "48", "height": "30", "rx": "5",
+                "fill": palette[3 if (row + column) % 3 else 4], "opacity": str(.48 + ((row + column) % 3) * .16),
+                "class": "sparkle" if (row + column) % 4 == 0 else "",
+            })
+    ET.SubElement(group, _tag("rect"), {"x": "615", "y": "500", "width": "86", "height": "75", "rx": "12", "fill": palette[0], "opacity": ".78"})
+    ET.SubElement(group, _tag("line"), {"x1": "658", "y1": "505", "x2": "658", "y2": "570", "stroke": palette[4], "stroke-width": "3", "stroke-opacity": ".42"})
+    ET.SubElement(root, _tag("ellipse"), {"cx": "650", "cy": "635", "rx": "290", "ry": "28", "fill": palette[2], "opacity": ".14", "class": "depth-front"})
+
+
+def _render_city(root: ET.Element, palette: tuple[str, ...]) -> None:
+    group = ET.SubElement(root, _tag("g"), {"id": "city-skyline", "class": "depth-mid"})
+    buildings = ((90, 165, 230), (245, 145, 330), (390, 180, 265), (565, 150, 390), (710, 190, 285), (895, 135, 350), (1020, 170, 245))
+    for index, (x, width, height) in enumerate(buildings):
+        ET.SubElement(group, _tag("rect"), {"x": str(x), "y": str(610 - height), "width": str(width), "height": str(height), "rx": "12", "fill": palette[index % min(len(palette), 4)], "opacity": ".78"})
+        for row in range(3):
+            ET.SubElement(group, _tag("rect"), {"x": str(x + 28), "y": str(610 - height + 45 + row * 55), "width": str(max(width - 56, 22)), "height": "12", "rx": "4", "fill": palette[4], "opacity": ".26"})
+
+
+def _render_vehicle(root: ET.Element, palette: tuple[str, ...]) -> None:
+    ET.SubElement(root, _tag("path"), {"d": "M60 585 Q640 505 1220 585 L1220 675 L60 675 Z", "fill": palette[0], "opacity": ".78"})
+    ET.SubElement(root, _tag("path"), {"d": "M100 605 Q640 540 1180 605", "fill": "none", "stroke": palette[4], "stroke-width": "5", "stroke-opacity": ".24", "stroke-dasharray": "28 38", "class": "depth-front"})
+    group = ET.SubElement(root, _tag("g"), {"id": "vehicle-scene", "filter": "url(#rimGlow)"})
+    ET.SubElement(group, _tag("path"), {"d": "M370 480 Q410 410 505 390 L760 390 Q850 410 910 480 L980 500 Q1015 510 1015 550 L1015 585 L285 585 L285 535 Q290 500 345 490 Z", "fill": "url(#subjectGlow)"})
+    ET.SubElement(group, _tag("path"), {"d": "M500 405 L590 330 L760 345 L840 405 Z", "fill": palette[1], "opacity": ".82"})
+    ET.SubElement(group, _tag("path"), {"d": "M520 397 L603 345 L665 350 L665 397 Z M680 350 L750 358 L818 397 L680 397 Z", "fill": palette[4], "opacity": ".3"})
+    for x in (430, 870):
+        ET.SubElement(group, _tag("circle"), {"cx": str(x), "cy": "585", "r": "56", "fill": "#111827"})
+        ET.SubElement(group, _tag("circle"), {"cx": str(x), "cy": "585", "r": "27", "fill": palette[4], "opacity": ".65"})
+    ET.SubElement(group, _tag("ellipse"), {"cx": "955", "cy": "515", "rx": "26", "ry": "14", "fill": palette[3], "filter": "url(#trailGlow)", "class": "glow-pulse"})
+    ET.SubElement(root, _tag("ellipse"), {"cx": "650", "cy": "638", "rx": "400", "ry": "35", "fill": palette[2], "opacity": ".13"})
+
+
+def _render_landscape(root: ET.Element, palette: tuple[str, ...]) -> None:
+    ET.SubElement(root, _tag("circle"), {"cx": "960", "cy": "205", "r": "72", "fill": palette[3], "filter": "url(#softGlow)", "class": "glow-pulse"})
+    ET.SubElement(root, _tag("polygon"), {"points": "0,610 230,350 410,590 605,285 860,610", "fill": palette[1], "opacity": ".72", "class": "depth-back"})
+    ET.SubElement(root, _tag("polygon"), {"points": "360,625 650,330 870,570 1030,385 1280,625", "fill": "url(#subjectGlow)", "opacity": ".74", "class": "depth-mid"})
+    ET.SubElement(root, _tag("polygon"), {"points": "0,650 270,500 520,640 780,470 1010,630 1280,530 1280,720 0,720", "fill": palette[0], "opacity": ".86"})
+    for x, y, rx in ((260, 455, 240), (700, 505, 300), (1080, 460, 225)):
+        ET.SubElement(root, _tag("ellipse"), {"cx": str(x), "cy": str(y), "rx": str(rx), "ry": "48", "fill": palette[4], "opacity": ".13", "class": "depth-mid"})
+
+
+def _render_product(root: ET.Element, palette: tuple[str, ...]) -> None:
+    ET.SubElement(root, _tag("ellipse"), {"cx": "640", "cy": "590", "rx": "260", "ry": "54", "fill": palette[1], "opacity": ".72"})
+    group = ET.SubElement(root, _tag("g"), {"id": "product-scene", "filter": "url(#rimGlow)"})
+    ET.SubElement(group, _tag("rect"), {"x": "500", "y": "245", "width": "280", "height": "320", "rx": "74", "fill": "url(#subjectGlow)"})
+    ET.SubElement(group, _tag("rect"), {"x": "530", "y": "275", "width": "55", "height": "240", "rx": "28", "fill": "#ffffff", "opacity": ".14"})
+    ET.SubElement(group, _tag("ellipse"), {"cx": "640", "cy": "535", "rx": "96", "ry": "18", "fill": palette[0], "opacity": ".2"})
+
+
+def _render_abstract(root: ET.Element, palette: tuple[str, ...]) -> None:
+    group = ET.SubElement(root, _tag("g"), {"id": "abstract-scene", "class": "depth-mid", "filter": "url(#softGlow)"})
+    shapes = ((410, 345, 170, 110, 2), (650, 305, 210, 145, 3), (850, 410, 150, 190, 4), (570, 500, 245, 95, 2))
+    for x, y, rx, ry, color in shapes:
+        ET.SubElement(group, _tag("ellipse"), {"cx": str(x), "cy": str(y), "rx": str(rx), "ry": str(ry), "fill": palette[color % len(palette)], "opacity": ".34"})
+    ET.SubElement(group, _tag("path"), {"d": "M230 460 Q460 170 680 390 T1060 285", "fill": "none", "stroke": palette[4], "stroke-width": "18", "stroke-opacity": ".32", "stroke-linecap": "round"})
 
 
 def _atmosphere(root: ET.Element, scene: str, palette: tuple[str, ...]) -> None:
@@ -291,3 +396,12 @@ _STYLE = """
 .depth-mid{animation:ambientDrift 11s ease-in-out infinite reverse;transform-origin:center;transform-box:fill-box}
 .depth-front{animation:ambientDrift 8s ease-in-out infinite;transform-origin:center;transform-box:fill-box}
 """
+
+
+def _scene_style(has_characters: bool) -> str:
+    if has_characters:
+        return _STYLE
+    return "\n".join(
+        line for line in _STYLE.splitlines()
+        if not line.startswith("@keyframes eyeBlink") and not line.startswith(".eye-blink")
+    )
