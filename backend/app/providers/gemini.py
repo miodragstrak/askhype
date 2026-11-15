@@ -474,7 +474,10 @@ class GeminiProvider:
         if not api_key.strip():
             raise AIProviderConfigurationError("Gemini provider is not configured.")
 
-        return genai.Client(api_key=api_key)
+        return genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=app_settings.gemini_timeout_seconds * 1000),
+        )
 
     @staticmethod
     def _payload_type(

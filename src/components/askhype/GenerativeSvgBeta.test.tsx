@@ -6,6 +6,7 @@ import { saveConversations } from '../../utils/conversation-storage';
 import { ConversationThread } from './ConversationThread';
 import { GenerativeSvgPreview } from './GenerativeSvgPreview';
 import previewSource from './GenerativeSvgPreview.tsx?raw';
+import composerSource from './PromptComposer.tsx?raw';
 import { PromptComposer } from './PromptComposer';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -39,6 +40,13 @@ describe('Generative SVG beta', () => {
     />);
     expect(thread).toContain('AskHype kreira animaciju…');
     expect(thread).toContain('title="AI animacija"');
+  });
+
+  it('keeps the reference backend contract but hides reference upload from beta UI', () => {
+    expect(composerSource).toContain("documentAction !== 'animation'");
+    expect(composerSource).toContain('AI animacije su u beta verziji. Rezultati mogu da variraju.');
+    expect(composerSource).not.toContain('Opcionalno: dodajte sliku kao vizuelnu referencu');
+    expect(composerSource).not.toContain('Dodaj referentnu sliku');
   });
 
   it('sends prompt-only and reference requests as multipart data', async () => {

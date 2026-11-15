@@ -183,14 +183,13 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       )}
       {documentAction === 'animation' && (
         <div className="space-y-1 px-2 pb-1 text-[11px] text-chat-muted">
-          <p>AI animacije su u beta verziji. Rezultati mogu da variraju, a složenije scene mogu zahtevati novu generaciju.</p>
-          <p>Opcionalno: dodajte sliku kao vizuelnu referencu za stil. Sadržaj i radnja i dalje se određuju vašim opisom.</p>
+          <p>AI animacije su u beta verziji. Rezultati mogu da variraju.</p>
         </div>
       )}
       <div className="flex items-end gap-2">
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple={documentAction !== 'animation'} className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
         <input ref={documentInputRef} type="file" accept=".pdf,.docx,.xlsx,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => { selectDocument(event.target.files); event.target.value = ''; }}/>
-        <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} aria-label={documentAction === 'animation' ? 'Dodaj referentnu sliku' : 'Dodaj slike'} title={documentAction === 'animation' ? 'Dodaj referentnu sliku' : 'Dodaj slike'} className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus size={19}/></button>
+        {documentAction !== 'animation' && <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} aria-label="Dodaj slike" title="Dodaj slike" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus size={19}/></button>}
         <button type="button" disabled={disabled || documentAction === 'animation'} onClick={() => documentInputRef.current?.click()} aria-label="Dodaj dokument" title="Documents — dodaj PDF, Word, Excel ili CSV" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><FileText size={19}/></button>
         <textarea
           ref={textareaRef}

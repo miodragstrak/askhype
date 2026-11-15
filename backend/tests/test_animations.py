@@ -27,9 +27,8 @@ from app.schemas.animations import AnimationPlan, AnimationRequest
 from app.services.animation_generation import AnimationGenerationService
 from app.core.config import settings
 from app.renderers.cartoon_renderer import CartoonRenderTimeout, RenderArtifact, create_workspace
-from app.providers.generative_svg import GeneratedSvgArtifact
-from app.renderers.svg_sanitizer import SvgValidationError, sanitize_svg
-from app.schemas.generative_svg import ReferenceArtAnalysis
+from app.renderers.svg_sanitizer import SvgValidationError
+from app.schemas.generative_svg import ArtDirection, ReferenceArtAnalysis
 animation_routes = importlib.import_module("app.api.routes.animations")
 
 
@@ -332,19 +331,36 @@ def test_mp4_poc_maps_render_timeout_without_internal_details(monkeypatch):
 class _GenerativeProvider:
     def __init__(self, failure=None): self.failure = failure
     async def generate(self, prompt, reference_image=None):
+        raise AssertionError("beta service must not request provider-generated SVG")
+    async def generate_art_direction(self, prompt):
         if self.failure: raise self.failure
-        analysis = None
-        if reference_image is not None:
-            analysis = ReferenceArtAnalysis(
-                dominant_palette=["#112233", "#445566"], contrast_level="soft",
-                lighting_style="glow", shape_language="round", line_treatment="thin",
-                texture_feel="smooth", depth_style="layered", composition_tendency="centered",
-                mood="dreamy", softness="soft", visual_complexity="medium",
-                background_character="atmospheric", character_style_notes="rounded",
-                motion_style_suggestion="slow", confidence_notes="high",
-            )
-        svg = sanitize_svg('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="5"/></svg>', duration_seconds=10)
-        return GeneratedSvgArtifact(SimpleNamespace(duration_seconds=10), svg, "test", 1, analysis, "medium" if analysis else None)
+        return _glow_direction()
+    async def analyze_reference(self, reference_image):
+        return ReferenceArtAnalysis(
+            dominant_palette=["#112233", "#445566"], contrast_level="soft",
+            lighting_style="glow", shape_language="round", line_treatment="thin",
+            texture_feel="smooth", depth_style="layered", composition_tendency="centered",
+            mood="dreamy", softness="soft", visual_complexity="medium",
+            background_character="atmospheric", character_style_notes="rounded",
+            motion_style_suggestion="slow", confidence_notes="high",
+        )
+
+
+def _glow_direction() -> ArtDirection:
+    return ArtDirection.model_validate({
+        "title": "Devojčica i pas", "duration_seconds": 10,
+        "scene_description": "Devojčica i pas gledaju zvezde.",
+        "characters": [
+            {"name": "Devojčica", "role": "posmatrač", "appearance": "zaobljen lik"},
+            {"name": "Pas", "role": "pratilac", "appearance": "mali pas"},
+        ],
+        "objects": [], "background_description": "Noćno zvezdano nebo",
+        "composition": "Dva lika u centru", "visual_style": "Meki glow",
+        "shape_language": "Zaobljeno", "palette": ["#112233", "#445566", "#ffd166"],
+        "lighting": "Mesečev sjaj", "line_treatment": "Meke linije", "depth_style": "Slojevito",
+        "mood": "Sanjivo", "motion_style": "Blago lebdenje",
+        "timeline_beats": [{"start": 0, "duration": 10, "description": "Posmatranje", "motion": "Lebdenje"}],
+    })
 
 
 def _generative_request(files=None, data=None, authenticated=True):
@@ -405,6 +421,45 @@ def test_generative_svg_safe_failure_releases_quota_and_hides_details():
         assert response.status_code == 502 and response.json()["detail"]["code"] == "invalid_animation_artifact"
         assert "private raw" not in response.text
         assert next(iter(repository.events.values()))["status"] == "failed"
+    finally: app.dependency_overrides.clear()
+
+
+def test_generative_svg_quality_failure_keeps_safe_ui_error_and_persists_category():
+    settings.generative_svg_beta_enabled = True
+    repository = InMemoryAnimationUsageRepository()
+    async def identity(): return _identity()
+    async def repo(): return repository
+    async def provider(): return _GenerativeProvider(SvgValidationError("artifact_quality_failed", "private coordinates"))
+    app.dependency_overrides.update({get_authenticated_identity: identity, get_animation_repository: repo, get_generative_svg_provider: provider})
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.post("/api/animations/generative-svg", data={"prompt": "Scena"})
+    try:
+        response = asyncio.run(request())
+        event = next(iter(repository.events.values()))
+        assert response.status_code == 502
+        assert response.json()["detail"]["code"] == "invalid_animation_artifact"
+        assert "private coordinates" not in response.text
+        assert event["failure_category"] == "artifact_quality_failed"
+    finally: app.dependency_overrides.clear()
+
+
+def test_generative_svg_timeout_keeps_timeout_response_and_persists_category():
+    settings.generative_svg_beta_enabled = True
+    repository = InMemoryAnimationUsageRepository()
+    async def identity(): return _identity()
+    async def repo(): return repository
+    async def provider(): return _GenerativeProvider(TimeoutError())
+    app.dependency_overrides.update({get_authenticated_identity: identity, get_animation_repository: repo, get_generative_svg_provider: provider})
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.post("/api/animations/generative-svg", data={"prompt": "Scena"})
+    try:
+        response = asyncio.run(request())
+        event = next(iter(repository.events.values()))
+        assert response.status_code == 504
+        assert response.json()["detail"]["code"] == "provider_timeout"
+        assert event["failure_category"] == "provider_timeout"
     finally: app.dependency_overrides.clear()
 
 

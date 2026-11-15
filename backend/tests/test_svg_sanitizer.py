@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.providers.generative_svg import GenerativeSvgProvider
+from app.providers.generative_svg import (
+    ART_DIRECTION_INSTRUCTION,
+    SVG_ARTIFACT_INSTRUCTION,
+    SVG_ARTIFACT_MAX_OUTPUT_TOKENS,
+    GenerativeSvgProvider,
+)
 from app.renderers.svg_preview import chrome_command
 from app.renderers.svg_sanitizer import (
     MAX_ELEMENTS,
@@ -288,3 +293,45 @@ def test_provider_stops_after_malformed_repair_without_third_attempt():
 def test_art_direction_descriptive_fields_are_bounded():
     direction = ArtDirection.model_validate(_direction()["art_direction"])
     assert direction.visual_style.startswith("Retro")
+
+
+def test_generation_instructions_require_stable_connected_characters_and_safe_composition():
+    instruction = SVG_ARTIFACT_INSTRUCTION
+    assert "one stable root <g> group" in instruction
+    assert "Keep body-part motion small and local" in instruction
+    assert "remain visually connected" in instruction
+    assert "5% margin" in instruction
+    assert "No important character may be clipped" in instruction
+    assert "Prefer subtle, coherent animation over exaggerated motion" in instruction
+    assert "whole-character root group" in instruction
+    assert "every character required by the prompt" in instruction
+    assert "fully visible" in ART_DIRECTION_INSTRUCTION
+
+
+def test_generation_instructions_prefer_soft_coded_animation_without_losing_semantics():
+    combined = f"{ART_DIRECTION_INSTRUCTION}\n{SVG_ARTIFACT_INSTRUCTION}"
+    assert "soft rounded silhouettes" in combined
+    assert "simplified geometric construction" in combined
+    assert "minimal anatomical detail" in combined
+    assert "Avoid realistic anatomy" in combined
+    assert "Prefer whole-character float" in combined
+    assert "independently animated heads or limbs" in combined
+    assert "glowing stars, sparkles, stardust" in combined
+    assert "particle trails" in combined
+    assert "soft glow" in combined
+    assert "semantically recognizable" in combined
+    assert "original prompt remains authoritative" in combined.casefold()
+    assert "Do not default to infographic-like flat icons" in combined
+
+
+def test_artifact_instruction_and_token_budget_require_compact_generation():
+    instruction = SVG_ARTIFACT_INSTRUCTION
+    assert "40-80 SVG elements" in instruction
+    assert "do not exceed about 100 elements" in instruction
+    assert "4-6 CSS @keyframes" in instruction
+    assert "Reuse gradients, one or two glow filters" in instruction
+    assert "Avoid duplicated decorative geometry" in instruction
+    assert "Do not emit XML comments, verbose metadata" in instruction
+    assert "Prefer whole-character movement" in instruction
+    assert "Create a compact production-ready SVG" in instruction
+    assert SVG_ARTIFACT_MAX_OUTPUT_TOKENS == 8192

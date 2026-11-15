@@ -1001,6 +1001,21 @@ def _settings(
     )
 
 
+def test_gemini_client_uses_configured_transport_timeout(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    sentinel = object()
+
+    def client(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr("app.providers.gemini.genai.Client", client)
+    provider = GeminiProvider(_settings())
+    assert provider._client is sentinel
+    assert captured["http_options"].timeout == 45_000
+    assert captured["api_key"] == "test-secret-key"
+
+
 def _valid_payload() -> dict[str, Any]:
     return {
         "answer_type": "recommendations",
