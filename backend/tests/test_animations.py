@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.renderers.cartoon_renderer import CartoonRenderTimeout, RenderArtifact, create_workspace
 from app.renderers.svg_sanitizer import SvgValidationError
 from app.schemas.generative_svg import ArtDirection, ReferenceArtAnalysis
+from app.schemas.generative_svg import StoryboardPlan
 animation_routes = importlib.import_module("app.api.routes.animations")
 
 
@@ -335,6 +336,16 @@ class _GenerativeProvider:
     async def generate_art_direction(self, prompt):
         if self.failure: raise self.failure
         return _glow_direction()
+    async def generate_storyboard(self, prompt, duration_seconds):
+        if self.failure: raise self.failure
+        from app.schemas.generative_svg import StoryboardPlan
+        durations = [duration_seconds // 3, duration_seconds // 3, duration_seconds - 2 * (duration_seconds // 3)]
+        return StoryboardPlan.model_validate({
+            "title": "Priča", "total_duration_seconds": duration_seconds,
+            "shared_art_direction": _glow_direction().model_dump(),
+            "recurring_subjects": [{"id": "girl", "name": "Devojčica", "kind": "child", "appearance": "zaobljen lik"}],
+            "scenes": [{"id": f"scene_{index + 1}", "duration_seconds": value, "description": "Devojčica gleda zvezde", "environment": "Noćno nebo", "subject_ids": ["girl"], "action": "Blago lebdenje", "mood": "Sanjivo", "composition": "Lik u centru", "transition_in": "fade", "transition_out": "crossfade"} for index, value in enumerate(durations)],
+        })
     async def analyze_reference(self, reference_image):
         return ReferenceArtAnalysis(
             dominant_palette=["#112233", "#445566"], contrast_level="soft",
@@ -361,6 +372,32 @@ def _glow_direction() -> ArtDirection:
         "mood": "Sanjivo", "motion_style": "Blago lebdenje",
         "timeline_beats": [{"start": 0, "duration": 10, "description": "Posmatranje", "motion": "Lebdenje"}],
     })
+
+
+def _storyboard(scene_count=3, total=15):
+    durations = [total // scene_count] * scene_count
+    durations[-1] += total - sum(durations)
+    return {
+        "title": "Putovanje", "total_duration_seconds": total,
+        "shared_art_direction": _glow_direction().model_dump(),
+        "recurring_subjects": [{"id": "hero", "name": "Plavo biće", "kind": "creature", "appearance": "Meko plavo biće sa zlatnim sjajem"}],
+        "scenes": [{"id": f"scene_{index + 1}", "duration_seconds": duration, "description": f"Scena {index + 1}", "environment": "Svemir", "subject_ids": ["hero"], "action": "Blago leti", "mood": "Sanjivo", "composition": "Heroj u srednjem planu", "transition_in": "fade", "transition_out": "crossfade"} for index, duration in enumerate(durations)],
+    }
+
+
+def test_storyboard_accepts_three_and_six_scenes_with_exact_duration():
+    assert len(StoryboardPlan.model_validate(_storyboard(3, 15)).scenes) == 3
+    assert len(StoryboardPlan.model_validate(_storyboard(6, 30)).scenes) == 6
+
+
+def test_storyboard_rejects_duration_mismatch_and_unknown_subject():
+    from pydantic import ValidationError
+    mismatch = _storyboard(); mismatch["total_duration_seconds"] = 20
+    with pytest.raises(ValidationError, match="scene durations"):
+        StoryboardPlan.model_validate(mismatch)
+    unknown = _storyboard(); unknown["scenes"][0]["subject_ids"] = ["missing"]
+    with pytest.raises(ValidationError, match="unknown recurring subject"):
+        StoryboardPlan.model_validate(unknown)
 
 
 def _generative_request(files=None, data=None, authenticated=True):
@@ -391,12 +428,12 @@ def test_generative_svg_prompt_only_and_reference_upload():
     settings.generative_svg_beta_enabled = True
     response, _ = _generative_request()
     assert response.status_code == 200
-    assert response.json()["svg"].startswith("<svg") and response.json()["has_reference"] is False
+    assert len(response.json()["scenes"]) == 3 and response.json()["scenes"][0]["svg"].startswith("<svg")
     from io import BytesIO
     from PIL import Image
     image = BytesIO(); Image.new("RGB", (8, 8), "navy").save(image, format="PNG")
     response, _ = _generative_request(files={"reference_image": ("style.png", image.getvalue(), "image/png")})
-    assert response.status_code == 200 and response.json()["has_reference"] is True
+    assert response.status_code == 200 and len(response.json()["scenes"]) == 3
 
 
 def test_generative_svg_rejects_invalid_reference_before_quota():

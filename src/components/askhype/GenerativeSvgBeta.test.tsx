@@ -55,12 +55,11 @@ describe('Generative SVG beta', () => {
       json: async () => ({ svg: '<svg/>', has_reference: true, generation_seconds: 1, attempts: 1, remaining_quota: 4, generated_at: new Date().toISOString() }),
     });
     vi.stubGlobal('fetch', fetchMock);
-    const file = new File(['image'], 'dream.webp', { type: 'image/webp' });
-    await sendGenerativeSvgAnimation('Noćna scena', file, { accessToken: 'token' });
+    await sendGenerativeSvgAnimation('Noćna scena', 20, { accessToken: 'token' });
     const options = fetchMock.mock.calls[0][1] as RequestInit;
     expect(options.method).toBe('POST');
     expect((options.body as FormData).get('prompt')).toBe('Noćna scena');
-    expect((options.body as FormData).get('reference_image')).toBe(file);
+    expect((options.body as FormData).get('duration_seconds')).toBe('20');
     expect((options.headers as Record<string, string>).Authorization).toBe('Bearer token');
   });
 
@@ -74,10 +73,12 @@ describe('Generative SVG beta', () => {
       { id: 'm', role: 'assistant', createdAt: '2026-01-01', response: {
         conversation_id: 'x', provider: 'gemini', answer_type: 'generative_svg_animation', summary: 'Spremna',
         recommendations: [], follow_up_actions: [], sources: [], generated_at: '2026-01-01', generative_svg: '<svg>PRIVATE</svg>',
+        generative_svg_storyboard: { title: 'Private', total_duration_seconds: 10, generation_seconds: 1, remaining_quota: 1, generated_at: '2026-01-01', scenes: [{ id: 'scene_1', duration_seconds: 10, transition_in: 'fade', transition_out: 'fade', svg: '<svg>STORYBOARD_PRIVATE</svg>' }] },
       } },
     ] }]);
     expect(stored).not.toContain('PRIVATE');
     const persisted = JSON.parse(stored);
     expect(persisted[0].messages[0].response.generative_svg).toBeUndefined();
+    expect(persisted[0].messages[0].response.generative_svg_storyboard).toBeUndefined();
   });
 });

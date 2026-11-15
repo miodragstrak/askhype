@@ -37,7 +37,7 @@ export const AskHypeShell = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaLimitPayload | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[]; document: PendingDocument | null; documentAction: DocumentAction } | null>(null);
+  const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[]; document: PendingDocument | null; documentAction: DocumentAction; animationDuration: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preferences = useMemo(() => storageUtils.getUserPreferences(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null;
@@ -65,6 +65,7 @@ export const AskHypeShell = () => {
     images: PendingImage[] = [],
     document: PendingDocument | null = null,
     documentAction: DocumentAction = 'analyze',
+    animationDuration = 20,
     options: { appendUser?: boolean; conversationId?: string } = {},
   ): Promise<boolean> => {
     const visiblePrompt = rawPrompt.trim();
@@ -111,7 +112,7 @@ export const AskHypeShell = () => {
 
     setActiveId(conversation.id);
     upsertConversation(pendingConversation);
-    setLastSubmission({ conversationId: conversation.id, text: prompt, images, document, documentAction });
+    setLastSubmission({ conversationId: conversation.id, text: prompt, images, document, documentAction, animationDuration });
     setLoading(true);
     setError(null);
     setQuota(null);
@@ -119,13 +120,13 @@ export const AskHypeShell = () => {
     try {
       let result;
       if (documentAction === 'animation') {
-        const animation = await sendGenerativeSvgAnimation(prompt, images[0]?.file ?? null, { accessToken: session?.access_token });
+        const animation = await sendGenerativeSvgAnimation(prompt, animationDuration, { accessToken: session?.access_token });
         const data: ChatResponse = {
           conversation_id: conversation.serverConversationId || `generative_svg_${createId()}`,
           provider: 'gemini', answer_type: 'generative_svg_animation',
           summary: 'AI animacija je spremna.', recommendations: [],
           follow_up_actions: [], sources: [], generated_at: animation.generated_at,
-          generative_svg: animation.svg, generative_svg_has_reference: animation.has_reference,
+          generative_svg_storyboard: animation,
           animation_quota_remaining: animation.remaining_quota,
         };
         result = { data, usage: null };
@@ -339,7 +340,7 @@ export const AskHypeShell = () => {
                 quota={quota}
                 onRetry={() => {
                   if (lastSubmission) {
-                    void submitPrompt(lastSubmission.text, lastSubmission.images, lastSubmission.document, lastSubmission.documentAction, {
+                    void submitPrompt(lastSubmission.text, lastSubmission.images, lastSubmission.document, lastSubmission.documentAction, lastSubmission.animationDuration, {
                       appendUser: false,
                       conversationId: lastSubmission.conversationId,
                     });
@@ -358,7 +359,7 @@ export const AskHypeShell = () => {
 
           <div className="flex-none border-t border-chat-border bg-chat-bg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
             <div className="mx-auto max-w-3xl">
-              <PromptComposer onSubmit={(prompt, images, document, action) => submitPrompt(prompt, images, document, action)} disabled={loading || Boolean(quota)} />
+              <PromptComposer onSubmit={(prompt, images, document, action, duration) => submitPrompt(prompt, images, document, action, duration)} disabled={loading || Boolean(quota)} />
               <p className="mt-2 text-center text-[11px] text-chat-muted">
                 Proveri termine, cene i dostupnost pre odluke.
               </p>

@@ -52,10 +52,11 @@ const AssistantResponse = ({
   });
   return (
   <div className="space-y-5 lg:space-y-6">
-    {!response.research && !response.animation && !response.generative_svg && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
+    {!response.research && !response.animation && !response.generative_svg && !response.generative_svg_storyboard && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
 
     {response.animation && <AnimationPreview plan={response.animation} remaining={response.animation_quota_remaining} />}
     {response.generative_svg && <GenerativeSvgPreview svg={response.generative_svg} remaining={response.animation_quota_remaining} onGenerateAgain={onRegenerate} />}
+    {response.generative_svg_storyboard && <GenerativeSvgPreview storyboard={response.generative_svg_storyboard} remaining={response.animation_quota_remaining} onGenerateAgain={onRegenerate} />}
 
     {response.research ? (
       <div className="space-y-6">

@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -89,5 +89,69 @@ class GenerativeSvgResponse(BaseModel):
     has_reference: bool
     generation_seconds: float = Field(ge=0)
     attempts: int = Field(ge=1, le=2)
+    remaining_quota: int = Field(ge=0)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class StoryboardSubject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,39}$")
+    name: str = Field(min_length=1, max_length=80)
+    kind: Literal["person", "child", "animal", "robot", "creature", "object"]
+    appearance: str = Field(min_length=1, max_length=300)
+
+
+class StoryboardScene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=r"^scene_[1-6]$")
+    duration_seconds: int = Field(ge=2, le=8)
+    description: str = Field(min_length=1, max_length=500)
+    environment: str = Field(min_length=1, max_length=300)
+    subject_ids: list[str] = Field(default_factory=list, max_length=8)
+    action: str = Field(min_length=1, max_length=250)
+    mood: str = Field(min_length=1, max_length=120)
+    composition: str = Field(min_length=1, max_length=220)
+    transition_in: Literal["fade", "crossfade", "slide"] = "fade"
+    transition_out: Literal["fade", "crossfade", "slide"] = "crossfade"
+
+
+class StoryboardPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=100)
+    total_duration_seconds: int = Field(ge=10, le=30)
+    shared_art_direction: ArtDirection
+    recurring_subjects: list[StoryboardSubject] = Field(default_factory=list, max_length=8)
+    scenes: list[StoryboardScene] = Field(min_length=3, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_timeline(self) -> "StoryboardPlan":
+        if sum(scene.duration_seconds for scene in self.scenes) != self.total_duration_seconds:
+            raise ValueError("scene durations must equal total duration")
+        subject_ids = {subject.id for subject in self.recurring_subjects}
+        if any(not set(scene.subject_ids).issubset(subject_ids) for scene in self.scenes):
+            raise ValueError("scene references an unknown recurring subject")
+        return self
+
+
+class StoryboardPlanEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    storyboard: StoryboardPlan
+
+
+class StoryboardSceneResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    duration_seconds: int
+    transition_in: Literal["fade", "crossfade", "slide"]
+    transition_out: Literal["fade", "crossfade", "slide"]
+    svg: str
+
+
+class StoryboardResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    total_duration_seconds: int
+    scenes: list[StoryboardSceneResponse] = Field(min_length=3, max_length=6)
+    generation_seconds: float = Field(ge=0)
     remaining_quota: int = Field(ge=0)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

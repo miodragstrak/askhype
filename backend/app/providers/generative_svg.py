@@ -25,7 +25,12 @@ from app.schemas.generative_svg import (
     ArtDirectionEnvelope,
     ReferenceArtAnalysis,
     ReferenceArtAnalysisEnvelope,
+    StoryboardPlan,
+    StoryboardPlanEnvelope,
 )
+
+STORYBOARD_INSTRUCTION = """Create one coherent storyboard for a deterministic coded animation.
+Return only the requested structured data. Use 3-6 scenes, each 2-8 seconds, and make scene durations add up exactly to the requested total duration. Preserve the user's narrative order. Use one shared visual identity across every scene: palette, glow, lighting, rounded shape language, atmosphere, and motion feel. Give recurring subjects stable IDs and one consistent appearance; scenes may only reference declared IDs. Keep descriptions concise and renderable. Allowed transitions are fade, crossfade, and slide. Do not request generated SVG, video, JavaScript, or arbitrary code."""
 
 ART_DIRECTION_INSTRUCTION = """Create a specific art direction and storyboard for one self-contained 10-15 second vector animation.
 Respond only with the requested structured data. Interpret the user's requested subject and tone creatively rather than applying a fixed house template.
@@ -225,6 +230,28 @@ class GenerativeSvgProvider:
         if isinstance(parsed, BaseModel): parsed = parsed.model_dump()
         envelope = ArtDirectionEnvelope.model_validate(parsed) if isinstance(parsed, dict) else ArtDirectionEnvelope.model_validate_json(getattr(response, "text", ""))
         return envelope.art_direction
+
+    async def generate_storyboard(self, prompt: str, duration_seconds: int) -> StoryboardPlan:
+        schema = prepare_gemini_response_schema(StoryboardPlanEnvelope.model_json_schema())
+        schema = remove_schema_keywords(schema, frozenset({"minItems", "maxItems", "pattern", "exclusiveMinimum"}))
+        response = await self._request_with_timing(
+            "storyboard",
+            contents=f"Requested duration: {duration_seconds} seconds\nUser animation prompt:\n{prompt}",
+            config=types.GenerateContentConfig(
+                system_instruction=STORYBOARD_INSTRUCTION,
+                response_mime_type="application/json",
+                response_json_schema=schema,
+                temperature=.6,
+                max_output_tokens=self.settings.gemini_max_output_tokens,
+            ),
+        )
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, BaseModel):
+            parsed = parsed.model_dump()
+        envelope = StoryboardPlanEnvelope.model_validate(parsed) if isinstance(parsed, dict) else StoryboardPlanEnvelope.model_validate_json(getattr(response, "text", ""))
+        if envelope.storyboard.total_duration_seconds != duration_seconds:
+            raise ValueError("storyboard duration does not match requested duration")
+        return envelope.storyboard
 
     async def analyze_reference(
         self,

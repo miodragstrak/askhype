@@ -25,20 +25,21 @@ from app.renderers.cartoon_renderer import (
 from app.providers.generative_svg import GenerativeSvgProvider
 from app.renderers.reference_image import MAX_REFERENCE_BYTES, ReferenceImageError, prepare_reference_image
 from app.renderers.svg_sanitizer import SvgValidationError
-from app.schemas.generative_svg import GenerativeSvgResponse
+from app.schemas.generative_svg import GenerativeSvgResponse, StoryboardResponse
 from app.services.generative_svg_generation import GenerativeSvgGenerationService
 
 router = APIRouter(prefix="/animations", tags=["animations"])
 
 
-@router.post("/generative-svg", response_model=GenerativeSvgResponse)
+@router.post("/generative-svg", response_model=StoryboardResponse)
 async def generate_svg_animation(
     prompt: str = Form(...),
+    duration_seconds: int = Form(default=20),
     reference_image: UploadFile | None = File(default=None),
     identity: RequestIdentity = Depends(get_authenticated_identity),
     repository: AnimationUsageRepository = Depends(get_animation_repository),
     provider: GenerativeSvgProvider | None = Depends(get_generative_svg_provider),
-) -> GenerativeSvgResponse:
+) -> StoryboardResponse:
     if not settings.generative_svg_beta_enabled:
         raise HTTPException(404, detail={"code": "feature_disabled", "message": "AI animacije trenutno nisu dostupne."})
     if provider is None:
@@ -46,6 +47,8 @@ async def generate_svg_animation(
     prompt = prompt.strip()
     if not prompt or len(prompt) > 3000:
         raise HTTPException(422, detail={"code": "invalid_prompt", "message": "Opis animacije je obavezan i može imati najviše 3000 znakova."})
+    if duration_seconds not in {10, 15, 20, 30}:
+        raise HTTPException(422, detail={"code": "invalid_duration", "message": "Trajanje animacije mora biti 10, 15, 20 ili 30 sekundi."})
 
     prepared_reference = None
     if reference_image is not None:
@@ -56,18 +59,14 @@ async def generate_svg_animation(
         finally:
             await reference_image.close()
     try:
-        return await GenerativeSvgGenerationService(repository, provider).generate(
-            prompt,
-            identity,
-            prepared_reference,
-        )
+        return await GenerativeSvgGenerationService(repository, provider).generate_storyboard(prompt, duration_seconds, identity, prepared_reference)
     except AnimationLimitReached as exc:
         raise HTTPException(429, detail={
             "code": "animation_daily_quota_reached",
             "message": f"Dostigli ste dnevni limit za animacije ({exc.limit}). Pokušajte ponovo sutra.",
             "used": exc.used, "limit": exc.limit, "remaining": 0, "reset_at": exc.reset_at.isoformat(),
         }) from exc
-    except SvgValidationError as exc:
+    except (SvgValidationError, ValueError) as exc:
         raise HTTPException(502, detail={
             "code": "invalid_animation_artifact",
             "message": "Animaciju trenutno nije moguće bezbedno prikazati. Pokušajte ponovo ili pojednostavite opis.",

@@ -46,6 +46,7 @@ export const saveConversations = (conversations: LocalConversation[]) => {
         const response = {
           ...message.response,
           generative_svg: undefined,
+          generative_svg_storyboard: undefined,
           ...(message.response.download
             ? { download: { filename: message.response.download.filename, available: false } }
             : {}),

@@ -35,11 +35,13 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
     palette = _palette(direction.palette)
     scene_text = _normalized(" ".join([
         direction.title, direction.scene_description, direction.background_description,
+        direction.composition, direction.motion_style,
+        *(f"{beat.description} {beat.motion}" for beat in direction.timeline_beats),
         *(f"{item.name} {item.description}" for item in direction.objects),
     ]))
     subjects = _subjects(direction, scene_text)[:MAX_PRIMARY_SUBJECTS]
     scene_family = "characters" if subjects else _scene_family(scene_text, bool(direction.objects))
-    positions = SUBJECT_POSITIONS[len(subjects)] if subjects else ()
+    positions = _subject_positions(direction, scene_text, len(subjects)) if subjects else ()
 
     ET.register_namespace("", SVG_NS)
     root = ET.Element(_tag("svg"), {
@@ -60,13 +62,14 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
     trail = ET.SubElement(defs, _tag("filter"), {"id": "trailGlow", "x": "-40%", "y": "-40%", "width": "180%", "height": "180%"})
     ET.SubElement(trail, _tag("feDropShadow"), {"dx": "0", "dy": "0", "stdDeviation": "6", "flood-color": palette[3], "flood-opacity": ".65"})
     style = ET.SubElement(root, _tag("style"))
-    style.text = _scene_style(bool(subjects))
+    style.text = _scene_style(bool(subjects), scene_text)
 
     ET.SubElement(root, _tag("rect"), {"width": "1280", "height": "720", "fill": "url(#sky)"})
     ET.SubElement(root, _tag("ellipse"), {"cx": "275", "cy": "180", "rx": "360", "ry": "245", "fill": "url(#atmosphereGlow)", "opacity": ".24", "class": "depth-back"})
     ET.SubElement(root, _tag("ellipse"), {"cx": "1030", "cy": "330", "rx": "330", "ry": "260", "fill": "url(#haloGlow)", "opacity": ".12", "class": "depth-mid"})
     _atmosphere(root, scene_text, palette)
     _environment(root, scene_text, palette)
+    _render_storyboard_objects(root, scene_text, direction, palette)
 
     families: list[str] = []
     for index, ((family, character), (x, y)) in enumerate(zip(subjects, positions, strict=True), start=1):
@@ -78,7 +81,7 @@ def render_glow_scene(direction: ArtDirection) -> GlowSceneRender:
             "cx": str(x), "cy": str(y + 45), "rx": "125", "ry": "135",
             "fill": "url(#haloGlow)", "opacity": ".13", "filter": "url(#softGlow)",
         })
-        _render_subject(root, family, character, index, x, y, subject_color, accent)
+        _render_subject(root, family, character, index, x, y, subject_color, accent, _motion_preset(scene_text, index))
 
     if not subjects:
         _render_non_character(root, scene_family, scene_text, palette)
@@ -198,12 +201,39 @@ def _has_any(text: str, terms: tuple[str, ...]) -> bool:
     )
 
 
+def _subject_positions(direction: ArtDirection, scene: str, count: int) -> tuple[tuple[int, int], ...]:
+    if count != 1:
+        return SUBJECT_POSITIONS[count]
+    if _has_any(scene, ("upper-left", "upper left", "gornj", "ulazi", "enter")):
+        return ((300, 335),)
+    if _has_any(scene, ("planet", "planeta", "right balance", "desno", "orbit", "prolazi", "pass")):
+        return ((355, 395),)
+    if _has_any(scene, ("meteor", "comet", "observe", "ugleda", "vidi", "stop")):
+        return ((390, 405),)
+    if _has_any(scene, ("land", "sleti", "descend", "landing", "moon", "mesec")):
+        return ((640, 390),)
+    return SUBJECT_POSITIONS[1]
+
+
+def _motion_preset(scene: str, index: int) -> str:
+    if _has_any(scene, ("land", "sleti", "descend", "landing")):
+        return "subject-land"
+    if _has_any(scene, ("meteor", "comet", "kometa")):
+        return "subject-observe"
+    if _has_any(scene, ("pass", "past", "prolazi", "orbit", "kruzi", "curving")):
+        return "subject-pass"
+    if _has_any(scene, ("observe", "ugleda", "vidi", "sees", "stop", "posmatra", "dodge")):
+        return "subject-observe"
+    if _has_any(scene, ("enter", "ulazi", "glide", "travels", "putuje", "flying", "forward")):
+        return "subject-enter"
+    return ("subject-float", "subject-bounce", "subject-drift")[index % 3]
+
+
 def _render_subject(
     root: ET.Element, family: str, character: ArtCharacter | None, index: int,
-    x: int, y: int, color: str, accent: str,
+    x: int, y: int, color: str, accent: str, motion: str,
 ) -> None:
     identifier = f"{family}-root-{index}"
-    motion = ("subject-float", "subject-bounce", "subject-drift")[index % 3]
     ET.SubElement(root, _tag("ellipse"), {"cx": str(x), "cy": str(y + 132), "rx": "88", "ry": "18", "fill": "#0b1638", "opacity": ".28"})
     group = ET.SubElement(root, _tag("g"), {"id": identifier, "class": motion, "filter": "url(#rimGlow)"})
     primary_fill = f"url(#subject{index})"
@@ -241,6 +271,26 @@ def _render_subject(
         ET.SubElement(group, _tag("circle"), {"cx": str(x - 30), "cy": str(y - 16), "r": "6", "fill": "#172342"})
         ET.SubElement(group, _tag("circle"), {"cx": str(x + 30), "cy": str(y - 16), "r": "6", "fill": "#172342"})
         ET.SubElement(group, _tag("path"), {"d": f"M{x-22} {y+24} Q{x} {y+42} {x+22} {y+24}", "fill": "none", "stroke": "#f7f3ff", "stroke-width": "6", "stroke-linecap": "round"})
+
+
+def _render_storyboard_objects(root: ET.Element, scene: str, direction: ArtDirection, palette: tuple[str, ...]) -> None:
+    object_text = _normalized(" ".join(f"{item.name} {item.description}" for item in direction.objects))
+    combined = f"{scene} {object_text}"
+    if _has_any(combined, ("ringed", "prsten", "saturn")):
+        group = ET.SubElement(root, _tag("g"), {"id": "ringed-planet", "class": "depth-back", "filter": "url(#softGlow)"})
+        ET.SubElement(group, _tag("ellipse"), {"cx": "940", "cy": "330", "rx": "225", "ry": "62", "fill": "none", "stroke": palette[3], "stroke-width": "20", "stroke-opacity": ".7", "transform": "rotate(-14 940 330)"})
+        ET.SubElement(group, _tag("circle"), {"cx": "940", "cy": "330", "r": "132", "fill": "url(#subjectGlow)"})
+        ET.SubElement(group, _tag("ellipse"), {"cx": "905", "cy": "292", "rx": "52", "ry": "30", "fill": palette[4], "opacity": ".2"})
+    if _has_any(combined, ("glowing_meteor", "glowing meteor", "meteor", "comet", "kometa")):
+        group = ET.SubElement(root, _tag("g"), {"id": "glowing-meteor", "class": "meteor-streak", "filter": "url(#trailGlow)"})
+        ET.SubElement(group, _tag("path"), {"d": "M1180 105 L790 300", "stroke": palette[3], "stroke-width": "28", "stroke-linecap": "round", "stroke-opacity": ".18"})
+        ET.SubElement(group, _tag("path"), {"d": "M1150 120 L850 270", "stroke": palette[4], "stroke-width": "12", "stroke-linecap": "round", "stroke-opacity": ".72"})
+        ET.SubElement(group, _tag("circle"), {"cx": "825", "cy": "282", "r": "34", "fill": palette[3]})
+    if _has_any(combined, ("tiny", "moon", "mesec", "lunar")):
+        group = ET.SubElement(root, _tag("g"), {"id": "tiny-moon-surface"})
+        ET.SubElement(group, _tag("path"), {"d": "M110 720 Q640 430 1170 720 Z", "fill": "url(#subjectGlow)", "filter": "url(#rimGlow)"})
+        for x, y, radius in ((390, 625, 34), (680, 580, 25), (900, 650, 44)):
+            ET.SubElement(group, _tag("ellipse"), {"cx": str(x), "cy": str(y), "rx": str(radius), "ry": str(max(12, radius // 2)), "fill": palette[1], "opacity": ".32"})
 
 
 def _render_non_character(root: ET.Element, family: str, scene: str, palette: tuple[str, ...]) -> None:
@@ -398,10 +448,24 @@ _STYLE = """
 """
 
 
-def _scene_style(has_characters: bool) -> str:
-    if has_characters:
-        return _STYLE
-    return "\n".join(
+_ACTION_STYLES = {
+    "subject-enter": "@keyframes subjectEnter{0%{transform:translate(-42px,8px)}100%{transform:translate(10px,-5px)}}\n.subject-enter{animation:subjectEnter 5s ease-in-out infinite alternate;transform-origin:center;transform-box:fill-box}",
+    "subject-pass": "@keyframes subjectPass{0%,100%{transform:translateX(-12px)}50%{transform:translate(28px,-8px)}}\n.subject-pass{animation:subjectPass 6s ease-in-out infinite;transform-origin:center;transform-box:fill-box}",
+    "subject-observe": "@keyframes subjectObserve{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}\n.subject-observe{animation:subjectObserve 6s ease-in-out infinite;transform-origin:center;transform-box:fill-box}",
+    "subject-land": "@keyframes subjectLand{0%{transform:translateY(-20px)}100%{transform:translateY(24px)}}\n.subject-land{animation:subjectLand 6s ease-out infinite alternate;transform-origin:center;transform-box:fill-box}",
+}
+_METEOR_STYLE = "@keyframes meteorStreak{0%,100%{transform:translate(22px,-12px);opacity:.75}50%{transform:translate(-18px,10px);opacity:1}}\n.meteor-streak{animation:meteorStreak 3s ease-in-out infinite;transform-origin:center;transform-box:fill-box}"
+
+
+def _scene_style(has_characters: bool, scene: str) -> str:
+    style = _STYLE if has_characters else "\n".join(
         line for line in _STYLE.splitlines()
         if not line.startswith("@keyframes eyeBlink") and not line.startswith(".eye-blink")
     )
+    if has_characters:
+        preset = _motion_preset(scene, 1)
+        if preset in _ACTION_STYLES:
+            style += "\n" + _ACTION_STYLES[preset]
+    if _has_any(scene, ("meteor", "comet", "kometa")):
+        style += "\n" + _METEOR_STYLE
+    return style

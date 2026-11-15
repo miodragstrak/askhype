@@ -118,11 +118,11 @@ export const sendAnimationGeneration = async (
 };
 
 export const sendGenerativeSvgAnimation = async (
-  prompt: string, referenceImage: File | null, options: ApiRequestOptions = {},
+  prompt: string, durationSeconds: number, options: ApiRequestOptions = {},
 ): Promise<GenerativeSvgResponse> => {
   const body = new FormData();
   body.append('prompt', prompt);
-  if (referenceImage) body.append('reference_image', referenceImage);
+  body.append('duration_seconds', String(durationSeconds));
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}/api/animations/generative-svg`, {

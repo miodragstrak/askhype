@@ -16,7 +16,7 @@ const hasPresentationIntent = (value: string): boolean => {
 };
 
 interface PromptComposerProps {
-  onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null, action: DocumentAction) => Promise<boolean>;
+  onSubmit: (value: string, images: PendingImage[], document: PendingDocument | null, action: DocumentAction, animationDuration: number) => Promise<boolean>;
   disabled?: boolean;
   autoFocus?: boolean;
 }
@@ -29,6 +29,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
   const documentActionRef = useRef<DocumentAction>('analyze');
   const actionExplicitRef = useRef(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [animationDuration, setAnimationDuration] = useState(20);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
@@ -73,7 +74,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       return;
     }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
-    if (await onSubmit(prompt, images, document, selectedAction)) {
+    if (await onSubmit(prompt, images, document, selectedAction, animationDuration)) {
       setValue('');
       images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
       setImages([]);
@@ -184,6 +185,10 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       {documentAction === 'animation' && (
         <div className="space-y-1 px-2 pb-1 text-[11px] text-chat-muted">
           <p>AI animacije su u beta verziji. Rezultati mogu da variraju.</p>
+          <div className="flex items-center gap-1" aria-label="Trajanje animacije">
+            <span className="mr-1">Trajanje:</span>
+            {[10, 15, 20, 30].map((duration) => <button key={duration} type="button" onClick={() => setAnimationDuration(duration)} className={`rounded-full px-2 py-1 ${animationDuration === duration ? 'bg-hype-blue text-white' : 'bg-chat-hover text-chat-muted'}`}>{duration} s</button>)}
+          </div>
         </div>
       )}
       <div className="flex items-end gap-2">
