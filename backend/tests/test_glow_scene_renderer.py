@@ -84,7 +84,8 @@ def test_teardrop_description_does_not_add_tea_props():
     )
     rendered, sanitized = _sanitized(direction)
     assert rendered.subject_families == ("child", "animal")
-    assert sanitized.element_count < 50
+    assert 'x="930" y="430"' not in sanitized.content
+    assert sanitized.element_count <= 100
 
 
 def test_creature_space_scene_contains_blob_and_stardust_trail():
@@ -141,3 +142,31 @@ def test_reference_palette_changes_renderer_without_copying_subjects():
 def test_renderer_output_is_deterministic_for_same_direction():
     direction = _direction(characters=[CHILD, DOG])
     assert render_glow_scene(direction).svg == render_glow_scene(direction).svg
+
+
+def test_premium_scene_has_layered_backgrounds_particles_and_parallax():
+    _, sanitized = _sanitized(_direction(characters=[CHILD, DOG]))
+    assert "atmosphereGlow" in sanitized.content and "haloGlow" in sanitized.content
+    assert "star-field-distant" in sanitized.content and "star-field-mid" in sanitized.content
+    assert "depth-back" in sanitized.content and "depth-mid" in sanitized.content
+    assert "depth-front" in sanitized.content
+    assert sanitized.css_keyframes == 6
+
+
+def test_characters_use_gradients_highlights_shadows_and_reusable_glow_filters():
+    _, sanitized = _sanitized(_direction(characters=[CHILD, DOG]))
+    assert "subject1" in sanitized.content and "subject2" in sanitized.content
+    assert "url(#subject1)" in sanitized.content
+    assert 'fill="#ffffff" opacity=".16"' in sanitized.content
+    for identifier in ("softGlow", "softShadow", "rimGlow", "trailGlow"):
+        assert f'id="{identifier}"' in sanitized.content
+    assert sanitized.element_count <= 100
+
+
+def test_particle_field_is_deterministic_and_varies_size_and_opacity():
+    direction = _direction(characters=[CREATURE], scene="Biće leti kroz svemir i zvezde.")
+    first = render_glow_scene(direction).svg
+    second = render_glow_scene(direction).svg
+    assert first == second
+    assert 'r="1"' in first or 'r="2"' in first
+    assert 'opacity=".28"' in first or 'opacity=".38"' in first
