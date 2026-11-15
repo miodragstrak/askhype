@@ -24,6 +24,7 @@ export interface AnimationPlan {
   timeline: Array<{ start: number; duration: number; target_id: string; action: AnimationAction; parameters: { x?: number | null; y?: number | null; text?: string | null } }>;
 }
 export interface AnimationResponse { animation_id: string; title: string; plan: AnimationPlan; generated_at: string; provider: string; model: string; quota: ResearchQuotaSnapshot }
+export interface GenerativeSvgResponse { svg: string; has_reference: boolean; generation_seconds: number; attempts: number; remaining_quota: number; generated_at: string }
 
 export interface ResearchSection { heading: string; content: string; }
 export interface ResearchSource { title: string; url: string; publisher?: string | null; date?: string | null; citation_ids?: number[]; display_label?: string | null; original_url?: string | null; }
@@ -98,6 +99,8 @@ export interface ChatResponse {
   research_quota_remaining?: number;
   animation?: AnimationPlan;
   animation_quota_remaining?: number;
+  generative_svg?: string;
+  generative_svg_has_reference?: boolean;
 }
 
 export interface ChatRecommendation {

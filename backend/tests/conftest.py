@@ -12,6 +12,9 @@ def default_to_mock_provider() -> None:
     settings.research_daily_limit = 3
     settings.gemini_animation_model = None
     settings.animation_daily_limit = 10
+    settings.animation_mp4_poc_enabled = False
+    settings.generative_svg_beta_enabled = False
+    settings.animation_render_timeout_seconds = 100
     settings.research_max_depth = "standard"
     settings.quota_enforcement_enabled = False
     settings.mock_subscriptions_enabled = True

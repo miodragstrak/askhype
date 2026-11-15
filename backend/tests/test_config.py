@@ -88,6 +88,8 @@ def test_research_agent_configuration_is_optional_but_must_be_deep_research() ->
         ({"gemini_api_key": None}, "GEMINI_API_KEY is required"),
         ({"frontend_origin": None}, "FRONTEND_ORIGIN or FRONTEND_ORIGINS is required"),
         ({"mock_subscriptions_enabled": True}, "MOCK_SUBSCRIPTIONS_ENABLED must be false"),
+        ({"animation_mp4_poc_enabled": True}, "ANIMATION_MP4_POC_ENABLED must be false"),
+        ({"generative_svg_beta_enabled": True}, "GENERATIVE_SVG_BETA_ENABLED must be false"),
         ({"anonymous_prompt_limit": 4}, "ANONYMOUS_PROMPT_LIMIT must be 5"),
     ],
 )

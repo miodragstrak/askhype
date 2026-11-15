@@ -41,9 +41,17 @@ export const saveConversations = (conversations: LocalConversation[]) => {
   try {
     const safe = sortConversations(conversations).map((conversation) => ({
       ...conversation,
-      messages: conversation.messages.map((message) => message.role === 'assistant' && message.response.download
-        ? { ...message, response: { ...message.response, download: { filename: message.response.download.filename, available: false } } }
-        : message),
+      messages: conversation.messages.map((message) => {
+        if (message.role !== 'assistant') return message;
+        const response = {
+          ...message.response,
+          generative_svg: undefined,
+          ...(message.response.download
+            ? { download: { filename: message.response.download.filename, available: false } }
+            : {}),
+        };
+        return { ...message, response };
+      }),
     }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
   } catch {

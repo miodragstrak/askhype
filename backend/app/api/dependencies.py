@@ -20,6 +20,7 @@ from app.services.usage_service import UsageService
 from app.repositories.research_repository import InMemoryResearchRepository, SupabaseResearchRepository, ResearchRepository
 from app.providers.research import GeminiResearchProvider, ResearchProvider
 from app.providers.animation import AnimationProvider, GeminiAnimationProvider, MockAnimationProvider
+from app.providers.generative_svg import GenerativeSvgProvider
 from app.repositories.animation_repository import (
     AnimationUsageRepository, InMemoryAnimationUsageRepository, SupabaseAnimationUsageRepository,
 )
@@ -40,6 +41,10 @@ async def get_animation_provider() -> AnimationProvider:
     if settings.ai_provider == "gemini":
         return GeminiAnimationProvider()
     return MockAnimationProvider()
+
+
+async def get_generative_svg_provider() -> GenerativeSvgProvider | None:
+    return GenerativeSvgProvider() if settings.generative_svg_beta_enabled else None
 
 
 async def get_research_repository() -> ResearchRepository:

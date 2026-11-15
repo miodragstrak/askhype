@@ -5,10 +5,12 @@ import type { LocalMessage } from '../../types/conversation';
 import { ResearchMarkdown } from './ResearchMarkdown';
 import { cleanResearchSourceLabel } from './research-display';
 import { AnimationPreview } from './AnimationPreview';
+import { GenerativeSvgPreview } from './GenerativeSvgPreview';
 
 interface ConversationThreadProps {
   messages: LocalMessage[];
   loading: boolean;
+  loadingLabel?: string;
   error: string | null;
   quota: QuotaLimitPayload | null;
   onRetry: () => void;
@@ -34,10 +36,12 @@ const hypeSourceOwner = (url: string): string | null => {
 const AssistantResponse = ({
   response,
   onFollowUp,
+  onRegenerate,
   disabled,
 }: {
   response: ChatResponse;
   onFollowUp: (prompt: string) => void;
+  onRegenerate: () => void;
   disabled: boolean;
 }) => {
   const researchSections = response.research?.sections.filter((section, index) => {
@@ -48,9 +52,10 @@ const AssistantResponse = ({
   });
   return (
   <div className="space-y-5 lg:space-y-6">
-    {!response.research && !response.animation && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
+    {!response.research && !response.animation && !response.generative_svg && <p className="whitespace-pre-wrap text-[15px] leading-7 text-chat-text">{response.summary}</p>}
 
     {response.animation && <AnimationPreview plan={response.animation} remaining={response.animation_quota_remaining} />}
+    {response.generative_svg && <GenerativeSvgPreview svg={response.generative_svg} remaining={response.animation_quota_remaining} onGenerateAgain={onRegenerate} />}
 
     {response.research ? (
       <div className="space-y-6">
@@ -240,6 +245,7 @@ const QuotaNotice = ({
 export const ConversationThread = ({
   messages,
   loading,
+  loadingLabel,
   error,
   quota,
   onRetry,
@@ -267,7 +273,7 @@ export const ConversationThread = ({
       ) : (
         <div key={message.id} className="grid grid-cols-[28px_minmax(0,1fr)] gap-3">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-hype-yellow text-xs font-black text-chat-surface">A</div>
-          <AssistantResponse response={message.response} onFollowUp={onFollowUp} disabled={loading} />
+          <AssistantResponse response={message.response} onFollowUp={onFollowUp} onRegenerate={onRetry} disabled={loading} />
         </div>
       ),
     )}
@@ -275,7 +281,7 @@ export const ConversationThread = ({
     {loading && (
       <div className="flex items-center gap-3 text-sm text-chat-muted" role="status">
         <Loader2 size={17} className="animate-spin" />
-        AskHype radi na odgovoru...
+        {loadingLabel ?? 'AskHype radi na odgovoru...'}
       </div>
     )}
 

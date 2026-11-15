@@ -1,13 +1,19 @@
 import asyncio
 import copy
+import importlib
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.dependencies import get_animation_provider, get_animation_repository, get_authenticated_identity
+from app.api.dependencies import (
+    get_animation_provider, get_animation_repository, get_authenticated_identity,
+    get_generative_svg_provider,
+)
 from app.auth.identity import RequestIdentity
 from app.main import app
 from app.providers.animation import (
@@ -17,8 +23,14 @@ from app.providers.animation import (
 )
 from app.providers.exceptions import AIAnimationPlanError, AIProviderRateLimitError, AIProviderUnavailableError
 from app.repositories.animation_repository import AnimationLimitReached, InMemoryAnimationUsageRepository
-from app.schemas.animations import AnimationPlan
+from app.schemas.animations import AnimationPlan, AnimationRequest
 from app.services.animation_generation import AnimationGenerationService
+from app.core.config import settings
+from app.renderers.cartoon_renderer import CartoonRenderTimeout, RenderArtifact, create_workspace
+from app.providers.generative_svg import GeneratedSvgArtifact
+from app.renderers.svg_sanitizer import SvgValidationError, sanitize_svg
+from app.schemas.generative_svg import ReferenceArtAnalysis
+animation_routes = importlib.import_module("app.api.routes.animations")
 
 
 def _plan() -> AnimationPlan:
@@ -262,3 +274,156 @@ def test_animation_api_maps_provider_errors_without_raw_details(error, status, c
         assert next(iter(repository.events.values()))["status"] == "failed"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_mp4_poc_endpoint_is_disabled_by_default_and_streams_with_cleanup_when_enabled(monkeypatch):
+    workspace = create_workspace()
+    output = workspace / "output.mp4"
+    output.write_bytes(b"safe-mp4")
+    artifact = RenderArtifact(workspace, output, 25, 0.25, len(b"safe-mp4"))
+    monkeypatch.setattr(animation_routes, "render_video", lambda plan: artifact)
+    async def direct_threadpool(function, *args, **kwargs): return function(*args, **kwargs)
+    monkeypatch.setattr(animation_routes, "run_in_threadpool", direct_threadpool)
+    async def identity(): return _identity()
+    async def provider(): return MockAnimationProvider()
+    app.dependency_overrides[get_authenticated_identity] = identity
+    app.dependency_overrides[get_animation_provider] = provider
+    async def request():
+        payload = AnimationRequest(prompt="Scena")
+        with pytest.raises(HTTPException) as disabled:
+            await animation_routes.render_animation_mp4(payload, await identity(), await provider())
+        settings.animation_mp4_poc_enabled = True
+        enabled = await animation_routes.render_animation_mp4(payload, await identity(), await provider())
+        return disabled.value, enabled
+    try:
+        disabled, enabled = asyncio.run(request())
+        assert disabled.status_code == 404
+        assert Path(enabled.path).read_bytes() == b"safe-mp4"
+        assert enabled.media_type == "video/mp4"
+        assert enabled.headers["x-askhype-animation-resolution"] == "1280x720"
+        assert enabled.background is not None
+        animation_routes.cleanup_workspace(workspace)
+        assert not workspace.exists()
+    finally:
+        if workspace.exists():
+            animation_routes.cleanup_workspace(workspace)
+        settings.animation_mp4_poc_enabled = False
+        app.dependency_overrides.clear()
+
+
+def test_mp4_poc_maps_render_timeout_without_internal_details(monkeypatch):
+    def timeout(plan): raise CartoonRenderTimeout("private filesystem details")
+    async def direct_threadpool(function, *args, **kwargs): return function(*args, **kwargs)
+    monkeypatch.setattr(animation_routes, "render_video", timeout)
+    monkeypatch.setattr(animation_routes, "run_in_threadpool", direct_threadpool)
+    settings.animation_mp4_poc_enabled = True
+    try:
+        with pytest.raises(HTTPException) as captured:
+            asyncio.run(animation_routes.render_animation_mp4(
+                AnimationRequest(prompt="Scena"), _identity(), MockAnimationProvider(),
+            ))
+        assert captured.value.status_code == 504
+        assert captured.value.detail["code"] == "render_timeout"
+        assert "private filesystem" not in str(captured.value.detail)
+    finally:
+        settings.animation_mp4_poc_enabled = False
+
+
+class _GenerativeProvider:
+    def __init__(self, failure=None): self.failure = failure
+    async def generate(self, prompt, reference_image=None):
+        if self.failure: raise self.failure
+        analysis = None
+        if reference_image is not None:
+            analysis = ReferenceArtAnalysis(
+                dominant_palette=["#112233", "#445566"], contrast_level="soft",
+                lighting_style="glow", shape_language="round", line_treatment="thin",
+                texture_feel="smooth", depth_style="layered", composition_tendency="centered",
+                mood="dreamy", softness="soft", visual_complexity="medium",
+                background_character="atmospheric", character_style_notes="rounded",
+                motion_style_suggestion="slow", confidence_notes="high",
+            )
+        svg = sanitize_svg('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="5"/></svg>', duration_seconds=10)
+        return GeneratedSvgArtifact(SimpleNamespace(duration_seconds=10), svg, "test", 1, analysis, "medium" if analysis else None)
+
+
+def _generative_request(files=None, data=None, authenticated=True):
+    repository = InMemoryAnimationUsageRepository()
+    async def identity(): return _identity()
+    async def repo(): return repository
+    async def provider(): return _GenerativeProvider()
+    app.dependency_overrides[get_animation_repository] = repo
+    app.dependency_overrides[get_generative_svg_provider] = provider
+    if authenticated: app.dependency_overrides[get_authenticated_identity] = identity
+    async def request():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/animations/generative-svg", data=data or {"prompt": "Noćna scena"}, files=files)
+    try: return asyncio.run(request()), repository
+    finally: app.dependency_overrides.clear()
+
+
+def test_generative_svg_beta_is_disabled_by_default_and_requires_authentication():
+    response, _ = _generative_request()
+    assert response.status_code == 404 and response.json()["detail"]["code"] == "feature_disabled"
+    settings.generative_svg_beta_enabled = True
+    response, _ = _generative_request(authenticated=False)
+    assert response.status_code == 401
+
+
+def test_generative_svg_prompt_only_and_reference_upload():
+    settings.generative_svg_beta_enabled = True
+    response, _ = _generative_request()
+    assert response.status_code == 200
+    assert response.json()["svg"].startswith("<svg") and response.json()["has_reference"] is False
+    from io import BytesIO
+    from PIL import Image
+    image = BytesIO(); Image.new("RGB", (8, 8), "navy").save(image, format="PNG")
+    response, _ = _generative_request(files={"reference_image": ("style.png", image.getvalue(), "image/png")})
+    assert response.status_code == 200 and response.json()["has_reference"] is True
+
+
+def test_generative_svg_rejects_invalid_reference_before_quota():
+    settings.generative_svg_beta_enabled = True
+    response, repository = _generative_request(files={"reference_image": ("bad.png", b"bad", "image/png")})
+    assert response.status_code == 400 and response.json()["detail"]["code"] == "invalid_reference_image"
+    assert repository.events == {}
+
+
+def test_generative_svg_safe_failure_releases_quota_and_hides_details():
+    settings.generative_svg_beta_enabled = True
+    repository = InMemoryAnimationUsageRepository()
+    async def identity(): return _identity()
+    async def repo(): return repository
+    async def provider(): return _GenerativeProvider(SvgValidationError("invalid_xml", "private raw svg"))
+    app.dependency_overrides.update({get_authenticated_identity: identity, get_animation_repository: repo, get_generative_svg_provider: provider})
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.post("/api/animations/generative-svg", data={"prompt": "Scena"})
+    try:
+        response = asyncio.run(request())
+        assert response.status_code == 502 and response.json()["detail"]["code"] == "invalid_animation_artifact"
+        assert "private raw" not in response.text
+        assert next(iter(repository.events.values()))["status"] == "failed"
+    finally: app.dependency_overrides.clear()
+
+
+def test_generative_svg_uses_existing_animation_daily_quota():
+    settings.generative_svg_beta_enabled = True
+    settings.animation_daily_limit = 1
+    repository = InMemoryAnimationUsageRepository()
+    owner = _identity()
+    async def identity(): return owner
+    async def repo(): return repository
+    async def provider(): return _GenerativeProvider()
+    app.dependency_overrides.update({get_authenticated_identity: identity, get_animation_repository: repo, get_generative_svg_provider: provider})
+    async def requests():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            first = await client.post("/api/animations/generative-svg", data={"prompt": "Prva"})
+            second = await client.post("/api/animations/generative-svg", data={"prompt": "Druga"})
+            return first, second
+    try:
+        first, second = asyncio.run(requests())
+        assert first.status_code == 200 and first.json()["remaining_quota"] == 0
+        assert second.status_code == 429 and second.json()["detail"]["code"] == "animation_daily_quota_reached"
+    finally: app.dependency_overrides.clear()

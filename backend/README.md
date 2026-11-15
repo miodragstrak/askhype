@@ -597,6 +597,23 @@ Document-backed plans are grounded only in extracted upload content. No remote
 media, arbitrary XML/code, templates, charts, macros or permanent file storage
 are used. Browser downloads are ephemeral and must be regenerated after reload.
 
+## Local cartoon MP4 PoC
+
+ASK-ANIM-002 adds a disabled-by-default technical PoC that renders the existing
+validated animation plan to 1280×720 PNG frames with Pillow and encodes them as
+25 fps H.264/yuv420p MP4 with local FFmpeg. Run the fixed acceptance scene with:
+
+```bash
+python scripts/render_cartoon_poc.py
+```
+
+The artifact is written to `/tmp/askhype-animation-poc.mp4`. The authenticated
+`POST /api/animations/render` test endpoint is available only when
+`ANIMATION_MP4_POC_ENABLED=true`; production configuration rejects that value.
+It streams a completed file and then removes its isolated temporary workspace.
+The current production Docker image intentionally does not install FFmpeg, so
+this path is local/test-only and must not be enabled on Render as-is.
+
 ## Limitations
 
 - Supabase schema and RPC behavior still require staging verification

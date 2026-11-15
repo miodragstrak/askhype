@@ -68,8 +68,8 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
       setValidationError('Deep Research podržava pitanje i najviše jedan dokument, ne slike.');
       return;
     }
-    if (selectedAction === 'animation' && (images.length || document)) {
-      setValidationError('Animacije se trenutno prave samo iz tekstualnog opisa.');
+    if (selectedAction === 'animation' && (!prompt || images.length > 1 || document)) {
+      setValidationError(!prompt ? 'Opis animacije je obavezan.' : 'AI animacija podržava najviše jednu referentnu sliku.');
       return;
     }
     if ((!prompt && !images.length) || (document && !prompt) || disabled) return;
@@ -87,7 +87,17 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
     if (!files) return;
     if (documentAction === 'presentation') return setValidationError('Slike nisu podržane kao izvor za prezentaciju.');
     if (documentAction === 'research') return setValidationError('Slike nisu podržane za Deep Research.');
-    if (documentAction === 'animation') return setValidationError('Animacije se trenutno prave samo iz tekstualnog opisa.');
+    if (documentAction === 'animation') {
+      const selected = [...files];
+      if (selected.length !== 1) return setValidationError('Možete dodati najviše jednu referentnu sliku.');
+      const file = selected[0];
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return setValidationError('Podržane su JPG, PNG i WebP slike.');
+      if (!file.size || file.size > 5 * 1024 * 1024) return setValidationError('Referentna slika mora biti manja od 5 MB.');
+      images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+      setImages([{ file, previewUrl: URL.createObjectURL(file) }]);
+      setValidationError(null);
+      return;
+    }
     if (document) return setValidationError('Ukloni dokument pre dodavanja slika.');
     const selected = [...files];
     if (images.length + selected.length > 3) return setValidationError('Možeš poslati najviše 3 slike u jednoj poruci.');
@@ -126,7 +136,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           onClick={() => { selectDocumentAction(documentActionRef.current === 'animation' ? 'analyze' : 'animation'); images.forEach((image) => URL.revokeObjectURL(image.previewUrl)); setImages([]); setValidationError(null); }}
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${documentAction === 'animation' ? 'bg-hype-blue text-white' : 'text-chat-muted hover:bg-chat-hover hover:text-chat-text'}`}
         >
-          <Sparkles size={14} /> Napravi animaciju
+          <Sparkles size={14} /> AI Animation <span className="rounded bg-hype-yellow px-1 py-0.5 text-[9px] font-bold text-chat-surface">Beta</span>
         </button>
         <button
           type="button"
@@ -148,7 +158,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
           <Presentation size={14} /> {documentAction === 'presentation' ? 'Prezentacija' : 'Napravi prezentaciju'}
         </button>
       </div>}
-      {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
+      {images.length > 0 && <div className="flex gap-2 p-2">{images.map((image) => <div key={image.previewUrl} className="relative flex items-center gap-2"><img src={image.previewUrl} alt="Priložena slika" className="h-16 w-16 rounded-lg object-cover"/><span className="max-w-44 truncate text-xs text-chat-muted">{image.file.name}</span><button type="button" aria-label="Ukloni sliku" onClick={() => { URL.revokeObjectURL(image.previewUrl); setImages((current) => current.filter((item) => item !== image)); }} className="absolute -right-1 -top-1 rounded-full bg-chat-surface p-1 text-chat-text"><X size={12}/></button></div>)}</div>}
       {document && (
         <div className="m-1 flex items-center gap-3 rounded-xl border border-chat-border bg-chat-surface px-3 py-2">
           <FileText size={18} className="flex-none text-hype-yellow" />
@@ -172,12 +182,15 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         <p className="px-2 pb-1 text-[11px] text-chat-muted">Deep Research koristi zaseban dnevni limit tokom beta testiranja.</p>
       )}
       {documentAction === 'animation' && (
-        <p className="px-2 pb-1 text-[11px] text-chat-muted">Animacije su trenutno u beta verziji. Koriste zaseban dnevni limit.</p>
+        <div className="space-y-1 px-2 pb-1 text-[11px] text-chat-muted">
+          <p>AI animacije su u beta verziji. Rezultati mogu da variraju, a složenije scene mogu zahtevati novu generaciju.</p>
+          <p>Opcionalno: dodajte sliku kao vizuelnu referencu za stil. Sadržaj i radnja i dalje se određuju vašim opisom.</p>
+        </div>
       )}
       <div className="flex items-end gap-2">
-        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
+        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple={documentAction !== 'animation'} className="hidden" onChange={(event) => { selectImages(event.target.files); event.target.value = ''; }}/>
         <input ref={documentInputRef} type="file" accept=".pdf,.docx,.xlsx,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={(event) => { selectDocument(event.target.files); event.target.value = ''; }}/>
-        <button type="button" disabled={disabled || documentAction === 'animation'} onClick={() => inputRef.current?.click()} aria-label="Dodaj slike" title="Dodaj slike" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus size={19}/></button>
+        <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} aria-label={documentAction === 'animation' ? 'Dodaj referentnu sliku' : 'Dodaj slike'} title={documentAction === 'animation' ? 'Dodaj referentnu sliku' : 'Dodaj slike'} className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><ImagePlus size={19}/></button>
         <button type="button" disabled={disabled || documentAction === 'animation'} onClick={() => documentInputRef.current?.click()} aria-label="Dodaj dokument" title="Documents — dodaj PDF, Word, Excel ili CSV" className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full text-chat-muted hover:bg-chat-hover disabled:cursor-not-allowed disabled:opacity-40"><FileText size={19}/></button>
         <textarea
           ref={textareaRef}
@@ -205,7 +218,7 @@ export const PromptComposer = ({ onSubmit, disabled = false, autoFocus = false }
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={disabled || (document ? !value.trim() : (!value.trim() && !images.length))}
+          disabled={disabled || (documentAction === 'animation' ? !value.trim() : document ? !value.trim() : (!value.trim() && !images.length))}
           aria-label="Pošalji poruku"
           title="Pošalji"
           className="mb-1 inline-flex h-10 w-10 flex-none items-center justify-center rounded-full bg-hype-yellow text-chat-surface transition enabled:hover:bg-yellow-300 focus:outline-none focus:ring-2 focus:ring-hype-yellow focus:ring-offset-2 focus:ring-offset-chat-elevated disabled:cursor-not-allowed disabled:bg-chat-hover disabled:text-chat-muted"

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     gemini_animation_model: str | None = None
     research_daily_limit: int = Field(default=3, gt=0)
     animation_daily_limit: int = Field(default=10, gt=0)
+    animation_mp4_poc_enabled: bool = False
+    generative_svg_beta_enabled: bool = False
+    animation_render_timeout_seconds: int = Field(default=100, gt=0, le=180)
     research_max_depth: Literal["quick", "standard", "deep"] = "standard"
     quota_enforcement_enabled: bool = False
     supabase_url: str | None = None
@@ -80,6 +83,10 @@ class Settings(BaseSettings):
             errors.append("wildcard frontend origins are not allowed")
         if self.mock_subscriptions_enabled:
             errors.append("MOCK_SUBSCRIPTIONS_ENABLED must be false")
+        if self.animation_mp4_poc_enabled:
+            errors.append("ANIMATION_MP4_POC_ENABLED must be false in production")
+        if self.generative_svg_beta_enabled:
+            errors.append("GENERATIVE_SVG_BETA_ENABLED must be false in production")
         if self.anonymous_prompt_limit != 5:
             errors.append("ANONYMOUS_PROMPT_LIMIT must be 5")
         if self.free_rolling_24h_prompt_limit != 10:

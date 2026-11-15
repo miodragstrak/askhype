@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, runResearch, sendAnimationGeneration, sendChatMessage, sendDocumentAnalysis, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, runResearch, sendChatMessage, sendDocumentAnalysis, sendGenerativeSvgAnimation, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
 import type { ChatResponse, DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
@@ -100,7 +100,7 @@ export const AskHypeShell = () => {
       imagePreviews: images.map((image) => image.previewUrl),
       documentName: document?.file.name,
       documentType: document?.file.name.split('.').pop()?.toLocaleUpperCase(),
-      documentAction: document ? documentAction : undefined,
+      documentAction: document || documentAction === 'animation' ? documentAction : undefined,
       createdAt: now,
     };
     const pendingConversation = {
@@ -119,13 +119,14 @@ export const AskHypeShell = () => {
     try {
       let result;
       if (documentAction === 'animation') {
-        const animation = await sendAnimationGeneration(prompt, { accessToken: session?.access_token });
+        const animation = await sendGenerativeSvgAnimation(prompt, images[0]?.file ?? null, { accessToken: session?.access_token });
         const data: ChatResponse = {
-          conversation_id: conversation.serverConversationId || `animation_${animation.animation_id}`,
-          provider: animation.provider, answer_type: 'animation_generation',
-          summary: `Animacija „${animation.title}” je spremna.`, recommendations: [],
+          conversation_id: conversation.serverConversationId || `generative_svg_${createId()}`,
+          provider: 'gemini', answer_type: 'generative_svg_animation',
+          summary: 'AI animacija je spremna.', recommendations: [],
           follow_up_actions: [], sources: [], generated_at: animation.generated_at,
-          animation: animation.plan, animation_quota_remaining: animation.quota.remaining,
+          generative_svg: animation.svg, generative_svg_has_reference: animation.has_reference,
+          animation_quota_remaining: animation.remaining_quota,
         };
         result = { data, usage: null };
       } else if (documentAction === 'research') {
@@ -333,6 +334,7 @@ export const AskHypeShell = () => {
               <ConversationThread
                 messages={activeConversation.messages}
                 loading={loading}
+                loadingLabel={lastSubmission?.documentAction === 'animation' ? 'AskHype kreira animaciju…' : undefined}
                 error={error}
                 quota={quota}
                 onRetry={() => {

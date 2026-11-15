@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import type { AnimationResponse, ChatRequest, ChatResponse, DocumentAnalysisResponse, PendingImage, ResearchJob } from '../types/chat';
+import type { AnimationResponse, ChatRequest, ChatResponse, DocumentAnalysisResponse, GenerativeSvgResponse, PendingImage, ResearchJob } from '../types/chat';
 import { getAnonymousId } from '../utils/anonymous-id';
 
 interface BackendValidationError {
@@ -101,6 +101,35 @@ export const sendAnimationGeneration = async (
     });
   } catch {
     throw new AnimationApiError('Servis za animacije trenutno nije dostupan. Pokušajte ponovo kasnije.', 0, 'animation_failed');
+  }
+  if (!response.ok) {
+    let payload: BackendValidationError | null = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    const detail = payload?.detail;
+    if (detail && typeof detail === 'object') {
+      const value = detail as { code?: unknown; message?: unknown };
+      if (typeof value.code === 'string' && typeof value.message === 'string') {
+        throw new AnimationApiError(value.message, response.status, value.code);
+      }
+    }
+    throw new AnimationApiError(getErrorMessage(response.status, payload), response.status, 'animation_failed');
+  }
+  return response.json();
+};
+
+export const sendGenerativeSvgAnimation = async (
+  prompt: string, referenceImage: File | null, options: ApiRequestOptions = {},
+): Promise<GenerativeSvgResponse> => {
+  const body = new FormData();
+  body.append('prompt', prompt);
+  if (referenceImage) body.append('reference_image', referenceImage);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/animations/generative-svg`, {
+      method: 'POST', headers: authHeaders(options.accessToken), body, signal: options.signal,
+    });
+  } catch {
+    throw new AnimationApiError('AI servis trenutno nije dostupan. Pokušajte ponovo.', 0, 'provider_unavailable');
   }
   if (!response.ok) {
     let payload: BackendValidationError | null = null;
