@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.0,<10.0.0",
+    "websockets>=14,<17",
 ]
 
 [tool.pytest.ini_options]

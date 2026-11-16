@@ -614,6 +614,57 @@ It streams a completed file and then removes its isolated temporary workspace.
 The current production Docker image intentionally does not install FFmpeg, so
 this path is local/test-only and must not be enabled on Render as-is.
 
+## Local storyboard MP4 exporter
+
+ASK-ANIM-014 exports an existing completed storyboard directory with
+`storyboard.json` and `scene-01.svg`, `scene-02.svg`, etc. Run from `backend/`
+in the local virtual environment, with Google Chrome/Chromium, FFmpeg (libx264),
+and preferably ffprobe installed. Install the QA Python dependencies with
+`pip install -e '.[dev]'`.
+
+```bash
+python scripts/export_storyboard_video.py \
+  --input reports/ask-anim-003a/storyboard-blue-creature \
+  --output /tmp/blue-creature.mp4
+```
+
+Without `--output`, the destination is `INPUT/final-video.mp4`. `--fps` defaults
+to 25 (integer range 1–60). The output is a silent 1280×720 H.264/yuv420p MP4
+with faststart for normal desktop/mobile playback. Progress goes to stderr;
+stdout is a JSON report with export/capture time, per-scene frame and animation
+counts, transitions, and ffprobe duration, dimensions, frame rate, codec,
+pixel format, and byte size. If ffprobe is missing, the report explicitly says
+the media properties could not be independently verified.
+
+One isolated headless browser seeks the **actual SVG CSS animations** at every
+frame, preserving authored easing, delays, particles, transforms, and glows.
+Scenes have separate documents to isolate CSS and SVG IDs. Existing SVG safety
+validation runs before capture; scripts and external resources are disabled.
+FFmpeg composes fade through black, crossfade, or slide left transitions using
+fixed application-owned arguments. Transitions last 0.6 seconds, rounded to a
+whole frame. Each shared boundary starts at the cumulative scene duration and
+uses the incoming scene's `transition_in` (which takes precedence if it differs
+from the previous `transition_out`). The first `transition_in` opens from black;
+the last `transition_out` closes to black. Extra live outgoing animation frames
+cover the overlaps, so transitions do not shorten or extend the storyboard.
+The final duration and frame count equal the storyboard total at the chosen fps.
+
+Capture is bounded to 10 minutes and encoding to 3 minutes. Temporary frames,
+browser profiles, and partial files are removed even on failure; the requested
+destination is atomically replaced only after successful encoding and available
+ffprobe checks. Source SVGs are never rewritten. This command faithfully exports
+the artwork present in those files: it does not infer missing objects/motion
+from the plan's descriptions. The older `storyboard-blue-creature` fixture
+predates the dedicated planet/meteor/landing SVGs in
+`reports/ask-anim-003a/ask-anim-013b-space-storyboard`.
+
+This is a local QA/production tool only. It has no connection to the beta UI,
+API, workers, storage, or production Docker dependencies.
+
+Run the exporter regressions with `pytest tests/test_storyboard_video_export.py`.
+Set `RUN_STORYBOARD_VIDEO_INTEGRATION=1` to also exercise real Chromium capture,
+backwards seeking, and FFmpeg composition with pixel checks for all transitions.
+
 ## Limitations
 
 - Supabase schema and RPC behavior still require staging verification
