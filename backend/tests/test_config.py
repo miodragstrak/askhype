@@ -69,6 +69,13 @@ def test_complete_production_configuration_is_valid() -> None:
     assert app_settings.allowed_frontend_origins == ["https://askhype.example"]
 
 
+def test_generative_svg_beta_can_be_enabled_in_production() -> None:
+    app_settings = _production_settings(generative_svg_beta_enabled=True)
+
+    assert app_settings.app_env == "production"
+    assert app_settings.generative_svg_beta_enabled is True
+
+
 def test_research_agent_configuration_is_optional_but_must_be_deep_research() -> None:
     assert _production_settings(gemini_research_model=None).gemini_research_model is None
     configured = _production_settings(gemini_research_model="deep-research-preview-04-2026")
@@ -89,7 +96,6 @@ def test_research_agent_configuration_is_optional_but_must_be_deep_research() ->
         ({"frontend_origin": None}, "FRONTEND_ORIGIN or FRONTEND_ORIGINS is required"),
         ({"mock_subscriptions_enabled": True}, "MOCK_SUBSCRIPTIONS_ENABLED must be false"),
         ({"animation_mp4_poc_enabled": True}, "ANIMATION_MP4_POC_ENABLED must be false"),
-        ({"generative_svg_beta_enabled": True}, "GENERATIVE_SVG_BETA_ENABLED must be false"),
         ({"anonymous_prompt_limit": 4}, "ANONYMOUS_PROMPT_LIMIT must be 5"),
     ],
 )
