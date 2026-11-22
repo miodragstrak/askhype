@@ -34,3 +34,4 @@ build/
 dist/
 .pytest_cache/
 .backups/
+supabase/.temp/
