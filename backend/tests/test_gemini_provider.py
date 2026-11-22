@@ -601,7 +601,7 @@ def test_source_request_is_grounded_in_fetched_text_without_recommendations() ->
     assert "Only explicitly supplied Hype" not in instruction
     schema = call["config"].response_json_schema
     assert schema["properties"]["recommendations"]["maxItems"] == 0
-    assert schema["properties"]["follow_up_actions"]["maxItems"] == 4
+    assert schema["properties"]["follow_up_actions"]["maxItems"] == 3
     validate_schema_required_properties(schema)
 
 

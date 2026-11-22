@@ -138,14 +138,36 @@ class GeminiSourceReference(BaseModel):
         return value
 
 
+def _response_language_rule(message: str) -> str:
+    normalized = " ".join(message.casefold().split())
+    explicit = (
+        ("English", ("answer in english", "respond in english", "odgovori na engleskom", "antworten sie auf englisch")),
+        ("German", ("answer in german", "respond in german", "odgovori na nemackom", "odgovori na nemačkom", "antworte auf deutsch")),
+        ("Serbian", ("answer in serbian", "respond in serbian", "odgovori na srpskom", "antworte auf serbisch")),
+    )
+    for language, phrases in explicit:
+        if any(phrase in normalized for phrase in phrases):
+            return f"Explicit override: respond in {language}."
+    tokens = set(normalized.replace("?", " ").replace("!", " ").replace(".", " ").split())
+    if any("а" <= character <= "я" for character in normalized) or tokens & {"šta", "kako", "molim", "želim", "može", "koji", "koja"}:
+        hint = "Serbian"
+    elif tokens & {"wie", "was", "warum", "bitte", "ich", "und", "oder", "kannst", "erkläre"}:
+        hint = "German"
+    elif tokens & {"what", "how", "why", "please", "can", "could", "explain", "the"}:
+        hint = "English"
+    else:
+        hint = "the language of the current message"
+    return f"Respond in {hint}, matching the current message and its script; request/profile language metadata is fallback context only."
+
+
 class GeminiChatPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    minimum_actions: ClassVar[int] = 2
+    minimum_actions: ClassVar[int] = 0
 
     answer_type: str
     summary: str
     recommendations: list[GeminiRecommendation] = Field(min_length=0, max_length=3)
-    follow_up_actions: list[str] = Field(min_length=2, max_length=4)
+    follow_up_actions: list[str] = Field(default_factory=list, max_length=3)
     sources: list[GeminiSourceReference] = Field(default_factory=list)
 
     @field_validator("answer_type", "summary", mode="before")
@@ -177,8 +199,8 @@ class GeminiChatPayload(BaseModel):
                 seen.add(key)
                 actions.append(action)
 
-        if not cls.minimum_actions <= len(actions) <= 4:
-            raise ValueError(f"must contain {cls.minimum_actions} to 4 non-empty unique actions")
+        if not cls.minimum_actions <= len(actions) <= 3:
+            raise ValueError(f"must contain {cls.minimum_actions} to 3 non-empty unique actions")
         return actions
 
 
@@ -190,7 +212,7 @@ class GeminiSourceChatPayload(GeminiChatPayload):
     minimum_actions: ClassVar[int] = 0
     answer_type: Literal["source_summary", "source_analysis"]
     recommendations: list[GeminiRecommendation] = Field(default_factory=list, max_length=0)
-    follow_up_actions: list[str] = Field(default_factory=list, max_length=4)
+    follow_up_actions: list[str] = Field(default_factory=list, max_length=3)
 
 
 class GeminiDocumentPayload(BaseModel):
@@ -681,6 +703,8 @@ class GeminiProvider:
                 "",
                 "Current message:",
                 request.message,
+                "Response language rule:",
+                _response_language_rule(request.message),
                 "Location context:",
                 build_location_context(request),
                 f"language: {request.language}",

@@ -185,9 +185,9 @@ const AssistantResponse = ({
       </div>
     )}
 
-    {response.follow_up_actions.length > 0 && (
-      <div className="flex flex-wrap gap-2">
-        {response.follow_up_actions.map((action) => (
+    {!disabled && response.follow_up_actions.length > 0 && (
+      <div className="flex flex-wrap gap-2" aria-label="Predložena dodatna pitanja">
+        {response.follow_up_actions.slice(0, 3).map((action) => (
           <button
             key={action}
             type="button"

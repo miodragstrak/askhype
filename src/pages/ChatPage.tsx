@@ -345,11 +345,11 @@ const AssistantMessage: React.FC<{
 
       {response.sources.length > 0 ? <SourcesList sources={response.sources} /> : <UnverifiedNotice />}
 
-      {response.follow_up_actions.length > 0 && (
+      {!disabled && response.follow_up_actions.length > 0 && (
         <div className="rounded-2xl bg-hype-light p-4 sm:p-5">
           <p className="mb-3 text-xs font-bold text-navy-900">Šta dalje?</p>
           <div className="flex flex-wrap gap-2">
-            {response.follow_up_actions.map((action) => (
+            {response.follow_up_actions.slice(0, 3).map((action) => (
               <button
                 key={action}
                 type="button"
