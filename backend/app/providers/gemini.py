@@ -15,7 +15,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, fiel
 from pydantic import TypeAdapter
 
 from app.core.config import Settings, settings
-from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, PRESENTATION_PLANNING_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION, XLSX_TRANSFORMATION_PLANNING_INSTRUCTION
+from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION, HYPE_GROUNDING_INSTRUCTION, IMAGE_ANALYSIS_INSTRUCTION, NATURAL_CHAT_INSTRUCTION, PRESENTATION_PLANNING_INSTRUCTION, SOURCE_ANALYSIS_INSTRUCTION, XLSX_TRANSFORMATION_PLANNING_INSTRUCTION
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -219,6 +219,8 @@ def resolve_output_language(message: str, profile_language: str | None = None) -
     detected = _latest_message_language(message)
     if detected:
         return ResolvedOutputLanguage(detected, "latest_message")
+    if any(character.isalpha() for character in message):
+        return ResolvedOutputLanguage("the language of the latest message", "latest_message")
     fallback = _LANGUAGE_CODE_NAMES.get((profile_language or "").casefold(), "the language of the latest message")
     return ResolvedOutputLanguage(fallback, "profile_fallback" if fallback != "the language of the latest message" else "latest_message")
 
@@ -302,6 +304,18 @@ class GeminiSourceChatPayload(GeminiChatPayload):
     answer_type: Literal["source_summary", "source_analysis"]
     recommendations: list[GeminiRecommendation] = Field(default_factory=list, max_length=0)
     follow_up_actions: list[str] = Field(default_factory=list, max_length=3)
+
+
+class GeminiNaturalChatPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answer: str
+
+    @field_validator("answer", mode="before")
+    @classmethod
+    def _trim_answer(cls, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("must be a non-empty string")
+        return value.strip()
 
 
 class GeminiDocumentPayload(BaseModel):
@@ -578,7 +592,15 @@ class GeminiProvider:
                 answer_type=payload.answer_type,
                 actions=payload.follow_up_actions,
             )
-        return self._to_chat_response(request, payload)
+        assert isinstance(payload, GeminiNaturalChatPayload)
+        return ChatResponse(
+            conversation_id=request.conversation_id or f"conv_{uuid4()}",
+            provider=self.provider_name,
+            answer_type="chat",
+            summary=payload.answer,
+            recommendations=[], follow_up_actions=[], sources=[],
+            generated_at=datetime.now(UTC),
+        )
 
     def _build_client(self, app_settings: Settings) -> genai.Client:
         if app_settings.gemini_api_key is None:
@@ -597,10 +619,10 @@ class GeminiProvider:
     def _payload_type(
         hype_context: HypeContext | None,
         source_context: PublicSourceContext | None,
-    ) -> type[GeminiChatPayload]:
+    ) -> type[GeminiChatPayload] | type[GeminiNaturalChatPayload]:
         if hype_context is not None:
             return GeminiHypeChatPayload
-        return GeminiSourceChatPayload if source_context is not None else GeminiChatPayload
+        return GeminiSourceChatPayload if source_context is not None else GeminiNaturalChatPayload
 
     def _build_generation_config(
         self,
@@ -610,9 +632,9 @@ class GeminiProvider:
     ) -> types.GenerateContentConfig:
         payload_type = self._payload_type(hype_context, source_context)
         response_schema = prepare_gemini_response_schema(payload_type.model_json_schema())
-        instruction = ASKHYPE_SYSTEM_INSTRUCTION
+        instruction = NATURAL_CHAT_INSTRUCTION
         if hype_context is not None:
-            instruction += "\n\n" + HYPE_GROUNDING_INSTRUCTION
+            instruction = ASKHYPE_SYSTEM_INSTRUCTION + "\n\n" + HYPE_GROUNDING_INSTRUCTION
         elif source_context is not None:
             instruction = SOURCE_ANALYSIS_INSTRUCTION
         if has_images:
@@ -720,7 +742,7 @@ class GeminiProvider:
             return "invalid_request"
         return "provider_error"
 
-    def _parse_payload(self, response: Any, payload_type: type[GeminiChatPayload] = GeminiChatPayload) -> GeminiChatPayload:
+    def _parse_payload(self, response: Any, payload_type: type[BaseModel] = GeminiNaturalChatPayload) -> BaseModel:
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, BaseModel):
             parsed = parsed.model_dump()

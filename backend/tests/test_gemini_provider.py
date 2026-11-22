@@ -18,6 +18,7 @@ from app.providers.exceptions import (
 )
 from app.providers.gemini import (
     GeminiChatPayload,
+    GeminiNaturalChatPayload,
     GeminiPresentationPlan,
     GeminiPresentationPlanEnvelope,
     GeminiProvider,
@@ -105,8 +106,9 @@ def no_retry_sleep(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", immediate_sleep)
 
 
-def test_successful_structured_response_becomes_chat_response() -> None:
-    models = FakeModels(FakeResponse(text=json.dumps(_valid_payload())))
+def test_successful_natural_response_becomes_compatible_chat_response() -> None:
+    natural_answer = "Evo direktnog i potpunog odgovora bez kartica."
+    models = FakeModels(FakeResponse(text=json.dumps(_natural_payload(natural_answer))))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
     request = ChatRequest(
         message="Predloži vikend izlazak u Beogradu",
@@ -122,11 +124,9 @@ def test_successful_structured_response_becomes_chat_response() -> None:
     assert response.conversation_id == "conv_existing"
     assert response.generated_at.tzinfo is not None
     assert response.generated_at.utcoffset() is not None
-    assert len(response.recommendations) == 3
-    assert response.recommendations[0].title == "Jazz veče"
-    assert response.recommendations[0].source_url is None
-    assert response.sources[0].url is None
-    assert response.sources[0].last_verified is not None
+    assert response.answer_type == "chat"
+    assert response.summary == natural_answer
+    assert response.recommendations == response.follow_up_actions == response.sources == []
 
     call = models.calls[0]
     assert call["model"] == "gemini-test-model"
@@ -144,16 +144,18 @@ def test_successful_structured_response_becomes_chat_response() -> None:
     assert call["config"].response_json_schema is not None
 
 
+def test_ordinary_dns_explanation_is_direct_chat_without_cards_or_followups() -> None:
+    answer = "DNS prevodi imena domena u IP adrese koje računari koriste za povezivanje."
+    models = FakeModels(FakeResponse(parsed={"answer": answer}))
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
+    response = asyncio.run(provider.generate_chat_response(ChatRequest(message="Objasni mi kako radi DNS.")))
+    assert response.answer_type == "chat"
+    assert response.summary == answer
+    assert response.recommendations == response.follow_up_actions == response.sources == []
+
+
 def test_production_request_path_has_one_authoritative_german_override() -> None:
-    payload = {
-        "answer_type": "recommendations",
-        "summary": "1. Belgrad — die Hauptstadt und größte Stadt.\n2. Novi Sad — ein wichtiges Kulturzentrum.\n3. Niš — ein bedeutendes Zentrum im Süden.",
-        "recommendations": [
-            {"id": "1", "title": "Belgrad", "category": "Stadt", "short_description": "Die größte Stadt Serbiens.", "location": "Serbien", "estimated_price": None, "date_or_duration": None, "reason": "Politisches und wirtschaftliches Zentrum.", "image_url": None, "source_url": None},
-        ],
-        "follow_up_actions": ["Vergleiche die Bevölkerungszahlen"],
-        "sources": [],
-    }
+    payload = _natural_payload("1. Belgrad — die Hauptstadt und größte Stadt.\n2. Novi Sad — ein wichtiges Kulturzentrum.\n3. Niš — ein bedeutendes Zentrum im Süden.")
     models = FakeModels(FakeResponse(text=json.dumps(payload)))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
     response = asyncio.run(provider.generate_chat_response(ChatRequest(
@@ -171,21 +173,21 @@ def test_production_request_path_has_one_authoritative_german_override() -> None
     assert "language: sr" not in combined
     assert "respond only in Serbian" not in combined
     assert response.summary.startswith("1. Belgrad")
-    assert response.recommendations[0].category == "Stadt"
-    assert response.follow_up_actions == ["Vergleiche die Bevölkerungszahlen"]
+    assert response.answer_type == "chat"
+    assert response.recommendations == response.follow_up_actions == []
 
 
-@pytest.mark.parametrize(("message", "language", "summary", "follow_up"), (
-    ("What are three benefits of remote work?", "English", "1. Flexibility — employees can organize work more easily.\n2. Less commuting — workers save time and money.\n3. Wider talent access — companies can hire beyond one location.", "Compare remote and office work"),
-    ("Quali sono tre vantaggi del lavoro da remoto?", "Italian", "1. Flessibilità — facilita l'organizzazione della giornata.\n2. Meno spostamenti — riduce tempi e costi.\n3. Accesso ai talenti — amplia l'area di selezione.", "Confronta lavoro remoto e ufficio"),
-    ("¿Cuáles son tres beneficios del trabajo remoto?", "Spanish", "1. Flexibilidad — facilita la organización diaria.\n2. Menos desplazamientos — reduce tiempo y costes.\n3. Acceso al talento — amplía la contratación.", "Compara trabajo remoto y oficina"),
-    ("Quels sont trois avantages du télétravail ?", "French", "1. Flexibilité — elle facilite l'organisation quotidienne.\n2. Moins de trajets — cela réduit le temps et les coûts.\n3. Accès aux talents — le recrutement devient plus large.", "Comparer télétravail et bureau"),
-    ("Answer in German: what are three benefits of remote work?", "German", "1. Flexibilität — Beschäftigte können ihren Tag besser organisieren.\n2. Weniger Pendeln — das spart Zeit und Kosten.\n3. Größerer Talentpool — Unternehmen können ortsunabhängig einstellen.", "Vergleiche Remote- und Büroarbeit"),
+@pytest.mark.parametrize(("message", "language", "summary"), (
+    ("What are three benefits of remote work?", "English", "1. Flexibility — employees can organize work more easily.\n2. Less commuting — workers save time and money.\n3. Wider talent access — companies can hire beyond one location."),
+    ("Quali sono tre vantaggi del lavoro da remoto?", "Italian", "1. Flessibilità — facilita l'organizzazione della giornata.\n2. Meno spostamenti — riduce tempi e costi.\n3. Accesso ai talenti — amplia l'area di selezione."),
+    ("¿Cuáles son tres beneficios del trabajo remoto?", "Spanish", "1. Flexibilidad — facilita la organización diaria.\n2. Menos desplazamientos — reduce tiempo y costes.\n3. Acceso al talento — amplía la contratación."),
+    ("Quels sont trois avantages du télétravail ?", "French", "1. Flexibilité — elle facilite l'organisation quotidienne.\n2. Moins de trajets — cela réduit le temps et les coûts.\n3. Accès aux talents — le recrutement devient plus large."),
+    ("Answer in German: what are three benefits of remote work?", "German", "1. Flexibilität — Beschäftigte können ihren Tag besser organisieren.\n2. Weniger Pendeln — das spart Zeit und Kosten.\n3. Größerer Talentpool — Unternehmen können ortsunabhängig einstellen."),
 ))
 def test_combined_language_and_complete_three_item_answer_path(
-    message: str, language: str, summary: str, follow_up: str,
+    message: str, language: str, summary: str,
 ) -> None:
-    payload = {"answer_type": "answer", "summary": summary, "recommendations": [], "follow_up_actions": [follow_up], "sources": []}
+    payload = _natural_payload(summary)
     models = FakeModels(FakeResponse(text=json.dumps(payload)))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
     response = asyncio.run(provider.generate_chat_response(ChatRequest(message=message, language="sr")))
@@ -193,7 +195,7 @@ def test_combined_language_and_complete_three_item_answer_path(
     assert f"resolved_output_language: {language}" in contents
     assert "The user requested 3 items" in contents
     assert all(f"{index}." in response.summary for index in range(1, 4))
-    assert response.follow_up_actions == [follow_up]
+    assert response.follow_up_actions == []
     assert "language: sr" not in contents
 
 
@@ -269,7 +271,7 @@ def test_empty_history_is_backward_compatible() -> None:
 
 
 def test_uuid_conversation_id_is_generated_when_absent() -> None:
-    models = FakeModels(FakeResponse(text=json.dumps(_valid_payload())))
+    models = FakeModels(FakeResponse(text=json.dumps(_natural_payload())))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
 
     response = asyncio.run(
@@ -281,7 +283,7 @@ def test_uuid_conversation_id_is_generated_when_absent() -> None:
 
 
 def test_images_are_sent_as_ordered_multimodal_parts() -> None:
-    models = FakeModels(FakeResponse(text=json.dumps(_valid_payload())))
+    models = FakeModels(FakeResponse(text=json.dumps(_natural_payload("The logo uses a blue geometric mark."))))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
     images = [
         ImageAttachment("image/png", b"png-bytes", "one.png"),
@@ -751,12 +753,25 @@ def test_generation_config_uses_sanitized_json_schema() -> None:
     assert config.response_schema is None
     assert schema is not None
     assert _find_key(schema, "default") == []
-    assert schema["title"] == "GeminiChatPayload"
-    assert schema["properties"]["recommendations"]["minItems"] == 0
-    assert schema["properties"]["recommendations"]["maxItems"] == 3
-    assert schema["properties"]["recommendations"]["items"]["properties"]["title"]["type"] == "string"
-    assert schema["properties"]["sources"]["items"]["properties"]["title"]["type"] == "string"
+    assert schema["title"] == "GeminiNaturalChatPayload"
+    assert set(schema["properties"]) == {"answer"}
+    assert schema["properties"]["answer"]["type"] == "string"
+    assert "recommendations" not in schema["properties"]
+    assert "follow_up_actions" not in schema["properties"]
+    assert "helpful general-purpose AI assistant" in config.system_instruction
+    assert "Do not force" in config.system_instruction
     validate_schema_required_properties(schema)
+
+
+def test_hype_generation_config_keeps_structured_recommendation_schema() -> None:
+    provider = GeminiProvider(app_settings=_settings(), client=FakeClient(FakeModels(FakeResponse(text="{}"))))
+    context = HypeContext("news", datetime.now(UTC).date())
+    config = provider._build_generation_config(hype_context=context)
+    schema = config.response_json_schema
+    assert schema["title"] == "GeminiHypeChatPayload"
+    assert schema["properties"]["recommendations"]["maxItems"] == 3
+    assert schema["properties"]["follow_up_actions"]["maxItems"] == 3
+    assert "Hype source context" in config.system_instruction
 
 
 def test_schema_sanitizer_preserves_property_names_without_mutation() -> None:
@@ -853,7 +868,7 @@ def test_gemini_invalid_argument_schema_error_is_not_unavailable() -> None:
 def test_transient_unavailable_retries_once_then_succeeds(no_retry_sleep) -> None:
     models = SequencedModels([
         FakeUnavailableError(),
-        FakeResponse(text=json.dumps(_valid_payload())),
+        FakeResponse(text=json.dumps(_natural_payload())),
     ])
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
 
@@ -864,7 +879,7 @@ def test_transient_unavailable_retries_once_then_succeeds(no_retry_sleep) -> Non
 
 
 def test_primary_success_never_calls_configured_fallback() -> None:
-    models = SequencedModels([FakeResponse(text=json.dumps(_valid_payload()))])
+    models = SequencedModels([FakeResponse(text=json.dumps(_natural_payload()))])
     provider = GeminiProvider(
         app_settings=_settings(fallback_model="gemini-fallback-model"),
         client=FakeClient(models),
@@ -879,7 +894,7 @@ def test_primary_success_never_calls_configured_fallback() -> None:
 def test_two_transient_unavailable_failures_then_success(no_retry_sleep) -> None:
     models = SequencedModels([
         FakeUnavailableError(), FakeUnavailableError(),
-        FakeResponse(text=json.dumps(_valid_payload())),
+        FakeResponse(text=json.dumps(_natural_payload())),
     ])
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
 
@@ -904,7 +919,7 @@ def test_all_transient_unavailable_attempts_propagate(no_retry_sleep) -> None:
 def test_primary_exhaustion_uses_fallback_once_and_succeeds(no_retry_sleep) -> None:
     models = SequencedModels([
         FakeUnavailableError(), FakeUnavailableError(), FakeUnavailableError(),
-        FakeResponse(text=json.dumps(_valid_payload())),
+        FakeResponse(text=json.dumps(_natural_payload())),
     ])
     provider = GeminiProvider(
         app_settings=_settings(fallback_model="gemini-fallback-model"),
@@ -1087,6 +1102,10 @@ def test_gemini_client_uses_configured_transport_timeout(monkeypatch) -> None:
     assert provider._client is sentinel
     assert captured["http_options"].timeout == 45_000
     assert captured["api_key"] == "test-secret-key"
+
+
+def _natural_payload(answer: str = "A direct natural answer.") -> dict[str, str]:
+    return {"answer": answer}
 
 
 def _valid_payload() -> dict[str, Any]:

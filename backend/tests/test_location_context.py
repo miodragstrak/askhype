@@ -104,6 +104,20 @@ def test_authoritative_resolver_priority_languages(message: str, expected: str) 
     assert resolve_output_language(message, "sr").language == expected
 
 
+@pytest.mark.parametrize("message", (
+    "Si funksionon sistemi DNS?",
+    "请解释 DNS 是如何工作的。",
+))
+def test_unknown_detector_language_defers_to_latest_message_not_serbian(message: str) -> None:
+    resolved = resolve_output_language(message, "sr")
+    assert resolved.language == "the language of the latest message"
+    assert resolved.source == "latest_message"
+    provider = object.__new__(GeminiProvider)
+    context = provider._build_user_context(ChatRequest(message=message, language="sr"))
+    assert "respond only in the language of the latest message" in context
+    assert "respond only in Serbian" not in context
+
+
 def test_answer_depth_instruction_requires_requested_substantive_item_count() -> None:
     normalized = " ".join(ASKHYPE_SYSTEM_INSTRUCTION.split())
     assert "requested number of substantive items with brief explanations" in normalized
