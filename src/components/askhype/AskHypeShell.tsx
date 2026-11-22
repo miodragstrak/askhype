@@ -21,6 +21,11 @@ import { ConversationSidebar } from './ConversationSidebar';
 import { ConversationThread } from './ConversationThread';
 import { EmptyConversation } from './EmptyConversation';
 import { PromptComposer } from './PromptComposer';
+import {
+  initializeAuthenticatedHistory,
+  SupabaseConversationRepository,
+} from '../../services/conversation-repository';
+import { clearConversations, migrationMarkerKey } from '../../utils/conversation-storage';
 
 const createId = () => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -29,7 +34,7 @@ const createId = () => {
 
 export const AskHypeShell = () => {
   const navigate = useNavigate();
-  const { session, user, profile } = useAuth();
+  const { session, user, profile, isLoading: authLoading } = useAuth();
   const { usage, applyUsageSnapshot, refreshUsage } = useUsage();
   const [conversations, setConversations] = useState<LocalConversation[]>(loadConversations);
   const [activeId, setActiveId] = useState<string | null>(() => loadActiveConversationId(conversations));
@@ -37,18 +42,75 @@ export const AskHypeShell = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaLimitPayload | null>(null);
+  const [historyOwner, setHistoryOwner] = useState<string | null>(null);
+  const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null);
   const [lastSubmission, setLastSubmission] = useState<{ conversationId: string; text: string; images: PendingImage[]; document: PendingDocument | null; documentAction: DocumentAction; animationDuration: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const preferences = useMemo(() => storageUtils.getUserPreferences(), []);
+  const conversationRepository = useMemo(() => new SupabaseConversationRepository(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null;
 
   useEffect(() => {
-    saveConversations(conversations);
-  }, [conversations]);
+    if (historyOwner === 'guest') saveConversations(conversations);
+  }, [conversations, historyOwner]);
 
   useEffect(() => {
-    saveActiveConversationId(activeId);
-  }, [activeId]);
+    if (historyOwner === 'guest') saveActiveConversationId(activeId);
+  }, [activeId, historyOwner]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    let cancelled = false;
+    setHistoryOwner(null);
+    setPersistenceNotice(null);
+
+    const initialize = async () => {
+      if (!user) {
+        const local = loadConversations();
+        if (cancelled) return;
+        setConversations(local);
+        setActiveId(loadActiveConversationId(local));
+        setHistoryOwner('guest');
+        return;
+      }
+
+      try {
+        const marker = migrationMarkerKey(user.id);
+        const storedMigrationState = localStorage.getItem(marker);
+        const migrationState = storedMigrationState === 'complete' || storedMigrationState === 'in_progress'
+          ? storedMigrationState
+          : null;
+        const local = migrationState === 'complete' ? [] : loadConversations();
+        const initialized = await initializeAuthenticatedHistory(
+          conversationRepository,
+          local,
+          migrationState,
+          () => localStorage.setItem(marker, 'in_progress'),
+        );
+        const serverConversations = initialized.conversations;
+        if (migrationState !== 'complete') {
+          localStorage.setItem(marker, 'complete');
+          if (initialized.migrated) clearConversations();
+        }
+        if (cancelled) return;
+        setConversations(serverConversations);
+        setActiveId((current) =>
+          serverConversations.some((conversation) => conversation.id === current)
+            ? current
+            : serverConversations[0]?.id ?? null,
+        );
+      } catch {
+        if (!cancelled) {
+          setPersistenceNotice('Istorija razgovora trenutno nije dostupna. Novi razgovor ostaje otvoren u ovoj sesiji.');
+        }
+      } finally {
+        if (!cancelled) setHistoryOwner(user.id);
+      }
+    };
+
+    void initialize();
+    return () => { cancelled = true; };
+  }, [authLoading, conversationRepository, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -116,6 +178,21 @@ export const AskHypeShell = () => {
     setLoading(true);
     setError(null);
     setQuota(null);
+
+    const persistUserMessage = user && appendUser
+      ? (async () => {
+          try {
+            if (!existing) await conversationRepository.createConversation(pendingConversation);
+            await conversationRepository.appendMessage(conversation.id, userMessage);
+            await conversationRepository.updateConversation(conversation.id, { updatedAt: now });
+            setPersistenceNotice(null);
+            return true;
+          } catch {
+            setPersistenceNotice('Razgovor radi, ali istorija trenutno nije sačuvana na nalogu.');
+            return false;
+          }
+        })()
+      : Promise.resolve(Boolean(user));
 
     try {
       let result;
@@ -229,6 +306,21 @@ export const AskHypeShell = () => {
         };
         return sortConversations([updated, ...current.filter((item) => item.id !== updated.id)]);
       });
+      if (user) {
+        void persistUserMessage.then(async (userMessageSaved) => {
+          if (!userMessageSaved) return;
+          try {
+            await conversationRepository.appendMessage(conversation.id, assistantMessage);
+            await Promise.all([
+              conversationRepository.updateConversation(conversation.id, { updatedAt: assistantMessage.createdAt }),
+              conversationRepository.setServerConversationId(conversation.id, result.data.conversation_id),
+            ]);
+            setPersistenceNotice(null);
+          } catch {
+            setPersistenceNotice('Odgovor je prikazan, ali istorija trenutno nije sačuvana na nalogu.');
+          }
+        });
+      }
       applyUsageSnapshot(result.usage);
       void refreshUsage();
       return true;
@@ -262,6 +354,11 @@ export const AskHypeShell = () => {
   const deleteConversation = (id: string) => {
     setConversations((current) => current.filter((conversation) => conversation.id !== id));
     if (activeId === id) startNew();
+    if (user) {
+      void conversationRepository.deleteConversation(id).catch(() => {
+        setPersistenceNotice('Razgovor je uklonjen sa ekrana, ali brisanje sa naloga trenutno nije potvrđeno.');
+      });
+    }
   };
 
   const authNavigate = (mode: 'signIn' | 'signUp') => {
@@ -359,10 +456,15 @@ export const AskHypeShell = () => {
 
           <div className="flex-none border-t border-chat-border bg-chat-bg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4">
             <div className="mx-auto max-w-3xl">
-              <PromptComposer onSubmit={(prompt, images, document, action, duration) => submitPrompt(prompt, images, document, action, duration)} disabled={loading || Boolean(quota)} />
+              <PromptComposer onSubmit={(prompt, images, document, action, duration) => submitPrompt(prompt, images, document, action, duration)} disabled={loading || Boolean(quota) || authLoading || historyOwner === null} />
               <p className="mt-2 text-center text-[11px] text-chat-muted">
                 Proveri termine, cene i dostupnost pre odluke.
               </p>
+              {persistenceNotice && (
+                <p className="mt-1 text-center text-[11px] text-chat-muted" role="status">
+                  {persistenceNotice}
+                </p>
+              )}
             </div>
           </div>
         </main>

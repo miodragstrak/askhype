@@ -2,6 +2,7 @@ import type { LocalConversation, LocalMessage } from '../types/conversation';
 
 const STORAGE_KEY = 'askhype:conversations:v1';
 const ACTIVE_CONVERSATION_KEY = 'askhype:active-conversation:v1';
+export const CONVERSATION_MIGRATION_KEY = 'askhype:conversation-migration:v1';
 
 const isMessage = (value: unknown): value is LocalMessage => {
   if (!value || typeof value !== 'object') return false;
@@ -37,28 +38,41 @@ export const loadConversations = (): LocalConversation[] => {
   }
 };
 
+export const sanitizeConversation = (conversation: LocalConversation): LocalConversation => ({
+  ...conversation,
+  messages: conversation.messages.map((message) => {
+    if (message.role !== 'assistant') return { ...message, imagePreviews: undefined };
+    const response = {
+      ...message.response,
+      generative_svg: undefined,
+      generative_svg_storyboard: undefined,
+      ...(message.response.download
+        ? { download: { filename: message.response.download.filename, available: false } }
+        : {}),
+    };
+    return { ...message, response };
+  }),
+});
+
 export const saveConversations = (conversations: LocalConversation[]) => {
   try {
-    const safe = sortConversations(conversations).map((conversation) => ({
-      ...conversation,
-      messages: conversation.messages.map((message) => {
-        if (message.role !== 'assistant') return message;
-        const response = {
-          ...message.response,
-          generative_svg: undefined,
-          generative_svg_storyboard: undefined,
-          ...(message.response.download
-            ? { download: { filename: message.response.download.filename, available: false } }
-            : {}),
-        };
-        return { ...message, response };
-      }),
-    }));
+    const safe = sortConversations(conversations).map(sanitizeConversation);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
   } catch {
     // The active conversation remains usable when storage is unavailable.
   }
 };
+
+export const clearConversations = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+  } catch {
+    // A completed server migration remains authoritative if storage is unavailable.
+  }
+};
+
+export const migrationMarkerKey = (userId: string) => `${CONVERSATION_MIGRATION_KEY}:${userId}`;
 
 export const loadActiveConversationId = (conversations: LocalConversation[]): string | null => {
   try {
