@@ -1,3 +1,5 @@
+import logging
+
 from app.core.config import settings
 from app.providers.base import AIProvider
 from app.providers.gemini import GeminiProvider
@@ -7,6 +9,9 @@ from app.schemas.attachments import ImageAttachment
 from app.services.hype_retrieval import HypeRetriever, hype_retriever, hype_topic
 from app.services.public_sources import PublicSourceReader, public_source_reader
 from app.services.source_response import build_source_response
+from app.services.chat_grounding import decide_chat_grounding
+
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedAIProviderError(RuntimeError):
@@ -33,7 +38,19 @@ class ChatService:
             if not source_context.documents and not images:
                 return build_source_response(source_context, request, self.provider.provider_name)
             return await self.provider.generate_chat_response(request, source_context=source_context, images=images)
-        return await self.provider.generate_chat_response(request, images=images)
+        grounding = decide_chat_grounding(request.message)
+        logger.info(
+            "Ordinary chat grounding decision: %s",
+            {
+                "ordinary_chat_grounding_enabled": grounding.enabled,
+                "grounding_category": grounding.category,
+            },
+        )
+        return await self.provider.generate_chat_response(
+            request,
+            images=images,
+            enable_grounding=grounding.enabled,
+        )
 
     def _provider_from_settings(self) -> AIProvider:
         if settings.ai_provider == "mock":

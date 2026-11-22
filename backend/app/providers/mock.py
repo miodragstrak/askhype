@@ -50,6 +50,7 @@ class MockAIProvider:
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
         images: list[ImageAttachment] | None = None,
+        enable_grounding: bool = False,
     ) -> ChatResponse:
         if hype_context is not None:
             return build_hype_response(

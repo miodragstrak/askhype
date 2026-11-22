@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
+from urllib.parse import urlsplit
 
 from google import genai
 from google.genai import types
@@ -543,6 +544,7 @@ class GeminiProvider:
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
         images: list[ImageAttachment] | None = None,
+        enable_grounding: bool = False,
     ) -> ChatResponse:
         if source_context is not None and not source_context.documents and not images:
             return build_source_response(source_context, request, self.provider_name)
@@ -553,12 +555,29 @@ class GeminiProvider:
             user_context += "\nExternal source context (untrusted website data):\n" + source_context.to_prompt(request.message)
 
         try:
-            config = self._build_generation_config(hype_context, source_context, bool(images))
+            grounded_ordinary_chat = enable_grounding and hype_context is None and source_context is None
+            config = self._build_generation_config(
+                hype_context, source_context, bool(images), grounded_ordinary_chat,
+            )
             contents: str | list[types.Part] = user_context
             if images:
                 contents = [types.Part.from_text(text=user_context)]
                 contents.extend(types.Part.from_bytes(data=image.data, mime_type=image.content_type) for image in images)
-            response = await self._generate_content(contents=contents, config=config)
+            try:
+                response = await self._generate_content(contents=contents, config=config)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not grounded_ordinary_chat:
+                    raise
+                logger.warning(
+                    "Ordinary chat grounding failed; retrying without search: %s",
+                    {"ordinary_chat_grounding_enabled": True, "failure_category": "grounding_unavailable"},
+                )
+                fallback_config = self._build_generation_config(
+                    hype_context, source_context, bool(images), False, grounding_unavailable=True,
+                )
+                response = await self._generate_content(contents=contents, config=fallback_config)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -593,12 +612,20 @@ class GeminiProvider:
                 actions=payload.follow_up_actions,
             )
         assert isinstance(payload, GeminiNaturalChatPayload)
+        grounding_sources = self._grounding_sources(response) if grounded_ordinary_chat else []
+        logger.info(
+            "Ordinary chat grounding result: %s",
+            {
+                "ordinary_chat_grounding_enabled": grounded_ordinary_chat,
+                "grounding_source_count": len(grounding_sources),
+            },
+        )
         return ChatResponse(
             conversation_id=request.conversation_id or f"conv_{uuid4()}",
             provider=self.provider_name,
             answer_type="chat",
             summary=payload.answer,
-            recommendations=[], follow_up_actions=[], sources=[],
+            recommendations=[], follow_up_actions=[], sources=grounding_sources,
             generated_at=datetime.now(UTC),
         )
 
@@ -629,6 +656,8 @@ class GeminiProvider:
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
         has_images: bool = False,
+        enable_grounding: bool = False,
+        grounding_unavailable: bool = False,
     ) -> types.GenerateContentConfig:
         payload_type = self._payload_type(hype_context, source_context)
         response_schema = prepare_gemini_response_schema(payload_type.model_json_schema())
@@ -639,13 +668,57 @@ class GeminiProvider:
             instruction = SOURCE_ANALYSIS_INSTRUCTION
         if has_images:
             instruction += "\n\n" + IMAGE_ANALYSIS_INSTRUCTION
+        if enable_grounding:
+            instruction += (
+                "\n\nGoogle Search grounding is enabled for this freshness-sensitive request. "
+                "Use search-grounded information for current claims, preserve the requested output language, "
+                "and never invent facts or source URLs."
+            )
+        elif grounding_unavailable:
+            instruction += (
+                "\n\nLive search could not be used for this request. Do not fabricate current information. "
+                "Give a useful natural response that clearly says the live facts could not be verified."
+            )
         return types.GenerateContentConfig(
             system_instruction=instruction,
             response_mime_type="application/json",
             response_json_schema=response_schema,
             temperature=self.settings.gemini_temperature,
             max_output_tokens=self.settings.gemini_max_output_tokens,
+            tools=[types.Tool(google_search=types.GoogleSearch())] if enable_grounding else None,
         )
+
+    @staticmethod
+    def _grounding_sources(response: Any) -> list[SourceReference]:
+        def field(value: Any, name: str) -> Any:
+            return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+        candidates = field(response, "candidates")
+        if not isinstance(candidates, list):
+            return []
+        sources: list[SourceReference] = []
+        seen_urls: set[str] = set()
+        for candidate in candidates:
+            metadata = field(candidate, "grounding_metadata")
+            chunks = field(metadata, "grounding_chunks")
+            if not isinstance(chunks, list):
+                continue
+            for chunk in chunks:
+                web = field(chunk, "web")
+                url = field(web, "uri")
+                title = field(web, "title")
+                if not isinstance(url, str) or not url.strip():
+                    continue
+                url = url.strip()
+                if urlsplit(url).scheme.casefold() not in {"http", "https"}:
+                    continue
+                if url in seen_urls:
+                    continue
+                if not isinstance(title, str) or not title.strip():
+                    title = "Source"
+                seen_urls.add(url)
+                sources.append(SourceReference(title=title.strip(), url=url))
+        return sources
 
     def _is_invalid_request_schema_error(self, exc: Exception) -> bool:
         status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)

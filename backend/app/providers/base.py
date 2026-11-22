@@ -19,6 +19,7 @@ class AIProvider(Protocol):
         hype_context: HypeContext | None = None,
         source_context: PublicSourceContext | None = None,
         images: list[ImageAttachment] | None = None,
+        enable_grounding: bool = False,
     ) -> ChatResponse:
         """Generate a structured chat response for AskHype."""
 
