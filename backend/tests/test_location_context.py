@@ -1,5 +1,5 @@
 from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION
-from app.providers.gemini import GeminiProvider
+from app.providers.gemini import GeminiProvider, _explicit_response_language
 from app.schemas.chat import ChatRequest
 from app.services.location_context import build_location_context
 
@@ -42,11 +42,41 @@ def test_language_rule_handles_serbian_english_german_and_explicit_override() ->
         ("Kako radi fotosinteza?", "Respond in Serbian"),
         ("How does photosynthesis work?", "Respond in English"),
         ("Wie funktioniert die Photosynthese?", "Respond in German"),
-        ("Wie funktioniert die Photosynthese? Answer in English.", "Explicit override: respond in English"),
+        ("Wie funktioniert die Photosynthese? Answer in English.", "MANDATORY explicit override: respond in English"),
     )
     for message, expected in cases:
         context = provider._build_user_context(ChatRequest(message=message, language="sr"))
         assert expected in context
+
+
+def test_multilingual_explicit_output_language_requests_have_highest_priority() -> None:
+    cases = (
+        ("Odgovori mi na engleskom: koja su tri najveća grada u Srbiji?", "English"),
+        ("Odgovori na engleskom jeziku.", "English"),
+        ("Please answer in English.", "English"),
+        ("Respond in English.", "English"),
+        ("Antworte auf Englisch.", "English"),
+        ("Réponds en anglais.", "English"),
+        ("Explain photosynthesis. Answer in German.", "German"),
+        ("Odgovori na francuskom.", "French"),
+        ("Rispondi in spagnolo.", "Spanish"),
+        ("Responde en italiano.", "Italian"),
+        ("Odgovori na hrvatskom.", "Croatian"),
+    )
+    for message, expected in cases:
+        assert _explicit_response_language(message) == expected
+
+
+def test_explicit_language_rule_covers_cards_descriptions_followups_and_fallbacks() -> None:
+    provider = object.__new__(GeminiProvider)
+    context = provider._build_user_context(ChatRequest(
+        message="Odgovori mi na engleskom: preporuči tri grada.", language="sr",
+    ))
+    assert "MANDATORY explicit override: respond in English" in context
+    assert "every recommendation/card field" in context
+    assert "all descriptions" in context
+    assert "follow-up suggestions" in context
+    assert "generated fallback text" in context
 
 
 def test_selected_location_does_not_override_message_location_in_context() -> None:

@@ -2,6 +2,8 @@ import asyncio
 import copy
 import json
 import logging
+import re
+import unicodedata
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -138,20 +140,52 @@ class GeminiSourceReference(BaseModel):
         return value
 
 
+_OUTPUT_LANGUAGE_COMMANDS = (
+    "answer", "respond", "reply", "write",
+    "odgovori", "odgovaraj", "pisi", "napisi",
+    "antworte", "antworten", "schreibe",
+    "reponds", "repondez", "repondre", "ecris",
+    "rispondi", "scrivi", "responde", "contesta", "escribe",
+)
+_OUTPUT_LANGUAGE_ALIASES = {
+    "English": ("english", "engleskom", "engleski", "englisch", "anglais", "inglese", "ingles"),
+    "Serbian": ("serbian", "srpskom", "srpski", "serbisch", "serbe", "serbo"),
+    "German": ("german", "nemackom", "nemacki", "deutsch", "allemand", "tedesco", "aleman"),
+    "French": ("french", "francuskom", "francuski", "franzosisch", "francais", "francese", "frances"),
+    "Italian": ("italian", "italijanskom", "italijanski", "italienisch", "italien", "italiano"),
+    "Spanish": ("spanish", "spanskom", "spanski", "spanisch", "espagnol", "espanol", "spagnolo"),
+    "Croatian": ("croatian", "hrvatskom", "hrvatski", "kroatisch", "croate", "croato"),
+}
+
+
+def _language_search_text(message: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", message.casefold())
+    return " ".join("".join(character for character in decomposed if not unicodedata.combining(character)).split())
+
+
+def _explicit_response_language(message: str) -> str | None:
+    normalized = _language_search_text(message)
+    command_pattern = "|".join(re.escape(command) for command in _OUTPUT_LANGUAGE_COMMANDS)
+    for language, aliases in _OUTPUT_LANGUAGE_ALIASES.items():
+        alias_pattern = "|".join(re.escape(alias) for alias in aliases)
+        if re.search(rf"\b(?:{command_pattern})\b[^\n.!?]{{0,64}}\b(?:{alias_pattern})\b", normalized):
+            return language
+    return None
+
+
 def _response_language_rule(message: str) -> str:
-    normalized = " ".join(message.casefold().split())
-    explicit = (
-        ("English", ("answer in english", "respond in english", "odgovori na engleskom", "antworten sie auf englisch")),
-        ("German", ("answer in german", "respond in german", "odgovori na nemackom", "odgovori na nemačkom", "antworte auf deutsch")),
-        ("Serbian", ("answer in serbian", "respond in serbian", "odgovori na srpskom", "antworte auf serbisch")),
-    )
-    for language, phrases in explicit:
-        if any(phrase in normalized for phrase in phrases):
-            return f"Explicit override: respond in {language}."
+    explicit_language = _explicit_response_language(message)
+    if explicit_language:
+        return (
+            f"MANDATORY explicit override: respond in {explicit_language}. "
+            "Use this language for the main answer, every heading, every recommendation/card field, "
+            "all descriptions, follow-up suggestions, and any generated fallback text."
+        )
+    normalized = _language_search_text(message)
     tokens = set(normalized.replace("?", " ").replace("!", " ").replace(".", " ").split())
-    if any("а" <= character <= "я" for character in normalized) or tokens & {"šta", "kako", "molim", "želim", "može", "koji", "koja"}:
+    if any("а" <= character <= "я" for character in normalized) or tokens & {"sta", "kako", "molim", "zelim", "moze", "koji", "koja"}:
         hint = "Serbian"
-    elif tokens & {"wie", "was", "warum", "bitte", "ich", "und", "oder", "kannst", "erkläre"}:
+    elif tokens & {"wie", "was", "warum", "bitte", "ich", "und", "oder", "kannst", "erklare"}:
         hint = "German"
     elif tokens & {"what", "how", "why", "please", "can", "could", "explain", "the"}:
         hint = "English"
