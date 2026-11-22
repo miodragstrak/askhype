@@ -1,5 +1,7 @@
+import pytest
+
 from app.prompts.askhype import ASKHYPE_SYSTEM_INSTRUCTION, DOCUMENT_ANALYSIS_INSTRUCTION
-from app.providers.gemini import GeminiProvider, _explicit_response_language
+from app.providers.gemini import GeminiProvider, _explicit_response_language, resolve_output_language
 from app.schemas.chat import ChatRequest
 from app.services.location_context import build_location_context
 
@@ -39,10 +41,10 @@ def test_prompt_is_general_purpose_and_language_follows_latest_message() -> None
 def test_language_rule_handles_serbian_english_german_and_explicit_override() -> None:
     provider = object.__new__(GeminiProvider)
     cases = (
-        ("Kako radi fotosinteza?", "Respond in Serbian"),
-        ("How does photosynthesis work?", "Respond in English"),
-        ("Wie funktioniert die Photosynthese?", "Respond in German"),
-        ("Wie funktioniert die Photosynthese? Answer in English.", "MANDATORY explicit override: respond in English"),
+        ("Kako radi fotosinteza?", "resolved_output_language: Serbian"),
+        ("How does photosynthesis work?", "resolved_output_language: English"),
+        ("Wie funktioniert die Photosynthese?", "resolved_output_language: German"),
+        ("Wie funktioniert die Photosynthese? Answer in English.", "resolved_output_language: English"),
     )
     for message, expected in cases:
         context = provider._build_user_context(ChatRequest(message=message, language="sr"))
@@ -72,11 +74,42 @@ def test_explicit_language_rule_covers_cards_descriptions_followups_and_fallback
     context = provider._build_user_context(ChatRequest(
         message="Odgovori mi na engleskom: preporuči tri grada.", language="sr",
     ))
-    assert "MANDATORY explicit override: respond in English" in context
-    assert "every recommendation/card field" in context
+    assert "resolved_output_language: English (source: explicit_request)" in context
+    assert "every recommendation/card title and category" in context
     assert "all descriptions" in context
     assert "follow-up suggestions" in context
     assert "generated fallback text" in context
+
+
+@pytest.mark.parametrize(("message", "expected"), (
+    ("Kako radi fotosinteza?", "Serbian"),
+    ("What are three benefits of remote work?", "English"),
+    ("Welche drei Vorteile hat Fernarbeit?", "German"),
+    ("Quels sont trois avantages du télétravail ?", "French"),
+    ("Quali sono tre vantaggi del lavoro da remoto?", "Italian"),
+    ("¿Cuáles son tres beneficios del trabajo remoto?", "Spanish"),
+    ("Koje su prednosti rada na daljinu za tvrtku?", "Croatian"),
+    ("Odgovori mi na engleskom: navedi tri koristi.", "English"),
+    ("Explain three benefits. Answer in German.", "German"),
+    ("Antworte auf Englisch: Welche Vorteile gibt es?", "English"),
+    ("Explain three benefits. Answer in French.", "French"),
+    ("Explain three benefits. Answer in Italian.", "Italian"),
+    ("Explain three benefits. Answer in Spanish.", "Spanish"),
+    ("Réponds en anglais: quels avantages?", "English"),
+    ("Rispondi in inglese: quali vantaggi?", "English"),
+    ("Responde en inglés: ¿cuáles beneficios?", "English"),
+    ("Odgovori mi na engleskom: koje su prednosti za tvrtku?", "English"),
+))
+def test_authoritative_resolver_priority_languages(message: str, expected: str) -> None:
+    assert resolve_output_language(message, "sr").language == expected
+
+
+def test_answer_depth_instruction_requires_requested_substantive_item_count() -> None:
+    normalized = " ".join(ASKHYPE_SYSTEM_INSTRUCTION.split())
+    assert "requested number of substantive items with brief explanations" in normalized
+    assert "Do not replace or shorten the main answer in favor of follow-up suggestions" in normalized
+    assert "concise but substantive" in normalized
+    assert "Follow-up suggestions must never substitute" in normalized
 
 
 def test_selected_location_does_not_override_message_location_in_context() -> None:

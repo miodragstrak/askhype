@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -156,6 +157,16 @@ _OUTPUT_LANGUAGE_ALIASES = {
     "Spanish": ("spanish", "spanskom", "spanski", "spanisch", "espagnol", "espanol", "spagnolo"),
     "Croatian": ("croatian", "hrvatskom", "hrvatski", "kroatisch", "croate", "croato"),
 }
+_LANGUAGE_CODE_NAMES = {
+    "sr": "Serbian", "en": "English", "de": "German", "fr": "French",
+    "it": "Italian", "es": "Spanish", "hr": "Croatian",
+}
+
+
+@dataclass(frozen=True)
+class ResolvedOutputLanguage:
+    language: str
+    source: str
 
 
 def _language_search_text(message: str) -> str:
@@ -166,32 +177,76 @@ def _language_search_text(message: str) -> str:
 def _explicit_response_language(message: str) -> str | None:
     normalized = _language_search_text(message)
     command_pattern = "|".join(re.escape(command) for command in _OUTPUT_LANGUAGE_COMMANDS)
-    for language, aliases in _OUTPUT_LANGUAGE_ALIASES.items():
-        alias_pattern = "|".join(re.escape(alias) for alias in aliases)
-        if re.search(rf"\b(?:{command_pattern})\b[^\n.!?]{{0,64}}\b(?:{alias_pattern})\b", normalized):
-            return language
+    candidates: list[tuple[int, str]] = []
+    for command in re.finditer(rf"\b(?:{command_pattern})\b", normalized):
+        directive = re.split(r"[:\n.!?]", normalized[command.end():command.end() + 64], maxsplit=1)[0]
+        for language, aliases in _OUTPUT_LANGUAGE_ALIASES.items():
+            alias_pattern = "|".join(re.escape(alias) for alias in aliases)
+            match = re.search(rf"\b(?:{alias_pattern})\b", directive)
+            if match:
+                candidates.append((command.end() + match.start(), language))
+    if candidates:
+        return min(candidates)[1]
     return None
 
 
-def _response_language_rule(message: str) -> str:
+def _latest_message_language(message: str) -> str | None:
+    normalized = _language_search_text(message)
+    tokens = set(re.findall(r"[a-zа-я]+", normalized))
+    if any("а" <= character <= "я" for character in normalized):
+        return "Serbian"
+    if tokens & {"quels", "quelles", "pourquoi", "bonjour", "avantages", "teletravail", "francais"}:
+        return "French"
+    if tokens & {"quali", "perche", "vantaggi", "lavoro", "italiano", "grazie"}:
+        return "Italian"
+    if tokens & {"cuales", "porque", "beneficios", "trabajo", "remoto", "espanol", "gracias"}:
+        return "Spanish"
+    if any(token.startswith(("tvrtk", "tisuc", "sijec", "racunal", "zrakoplov", "uvijek")) for token in tokens):
+        return "Croatian"
+    if tokens & {"wie", "was", "warum", "bitte", "ich", "und", "oder", "kannst", "erklare", "vorteile"}:
+        return "German"
+    if tokens & {"sta", "kako", "molim", "zelim", "moze", "koji", "koja", "koliki", "predlozi"}:
+        return "Serbian"
+    if tokens & {"what", "how", "why", "please", "can", "could", "explain", "the", "benefits", "remote"}:
+        return "English"
+    return None
+
+
+def resolve_output_language(message: str, profile_language: str | None = None) -> ResolvedOutputLanguage:
     explicit_language = _explicit_response_language(message)
     if explicit_language:
-        return (
-            f"MANDATORY explicit override: respond in {explicit_language}. "
-            "Use this language for the main answer, every heading, every recommendation/card field, "
-            "all descriptions, follow-up suggestions, and any generated fallback text."
-        )
+        return ResolvedOutputLanguage(explicit_language, "explicit_request")
+    detected = _latest_message_language(message)
+    if detected:
+        return ResolvedOutputLanguage(detected, "latest_message")
+    fallback = _LANGUAGE_CODE_NAMES.get((profile_language or "").casefold(), "the language of the latest message")
+    return ResolvedOutputLanguage(fallback, "profile_fallback" if fallback != "the language of the latest message" else "latest_message")
+
+
+def _requested_item_count(message: str) -> int | None:
     normalized = _language_search_text(message)
-    tokens = set(normalized.replace("?", " ").replace("!", " ").replace(".", " ").split())
-    if any("а" <= character <= "я" for character in normalized) or tokens & {"sta", "kako", "molim", "zelim", "moze", "koji", "koja"}:
-        hint = "Serbian"
-    elif tokens & {"wie", "was", "warum", "bitte", "ich", "und", "oder", "kannst", "erklare"}:
-        hint = "German"
-    elif tokens & {"what", "how", "why", "please", "can", "could", "explain", "the"}:
-        hint = "English"
-    else:
-        hint = "the language of the current message"
-    return f"Respond in {hint}, matching the current message and its script; request/profile language metadata is fallback context only."
+    numeric = re.search(r"\b([1-9]|10)\b", normalized)
+    if numeric:
+        return int(numeric.group(1))
+    words = {
+        "one": 1, "jedan": 1, "eine": 1, "un": 1, "uno": 1,
+        "two": 2, "dva": 2, "zwei": 2, "deux": 2, "due": 2, "dos": 2,
+        "three": 3, "tri": 3, "drei": 3, "trois": 3, "tre": 3, "tres": 3,
+        "four": 4, "cetiri": 4, "vier": 4, "quatre": 4, "quattro": 4, "cuatro": 4,
+        "five": 5, "pet": 5, "funf": 5, "cinq": 5, "cinque": 5, "cinco": 5,
+    }
+    tokens = set(re.findall(r"[a-z]+", normalized))
+    return next((count for word, count in words.items() if word in tokens), None)
+
+
+def _response_language_rule(resolved: ResolvedOutputLanguage) -> str:
+    return (
+        f"AUTHORITATIVE resolved_output_language: {resolved.language} (source: {resolved.source}). "
+        f"MANDATORY: respond only in {resolved.language}. Use this exact language for the main answer, "
+        "every heading, every recommendation/card title and category, all descriptions and reasons, "
+        "follow-up suggestions, and any generated fallback text. No conversation history, profile locale, "
+        "location, or other language metadata may override resolved_output_language."
+    )
 
 
 class GeminiChatPayload(BaseModel):
@@ -327,6 +382,7 @@ class GeminiProvider:
         self._client = client or self._build_client(app_settings)
 
     async def generate_document_answer(self, prompt: str, document: ExtractedDocument) -> str:
+        resolved_language = resolve_output_language(prompt)
         context = "\n".join(
             [
                 "Uploaded document context (untrusted data):",
@@ -337,12 +393,14 @@ class GeminiProvider:
                 "User question:",
                 prompt,
                 "",
+                _response_language_rule(resolved_language),
+                "",
                 "Extracted document content:",
                 document.text,
             ]
         )
         config = types.GenerateContentConfig(
-            system_instruction=DOCUMENT_ANALYSIS_INSTRUCTION,
+            system_instruction=DOCUMENT_ANALYSIS_INSTRUCTION + "\n\n" + _response_language_rule(resolved_language),
             response_mime_type="application/json",
             response_json_schema=prepare_gemini_response_schema(GeminiDocumentPayload.model_json_schema()),
             temperature=self.settings.gemini_temperature,
@@ -722,6 +780,8 @@ class GeminiProvider:
         )
 
     def _build_user_context(self, request: ChatRequest) -> str:
+        resolved_language = resolve_output_language(request.message, request.language)
+        requested_count = _requested_item_count(request.message)
         interests = ", ".join(request.interests) if request.interests else "none supplied"
         conversation = request.conversation_id or "none supplied"
         history = (
@@ -738,10 +798,15 @@ class GeminiProvider:
                 "Current message:",
                 request.message,
                 "Response language rule:",
-                _response_language_rule(request.message),
+                _response_language_rule(resolved_language),
+                "Answer completeness rule:",
+                (
+                    f"The user requested {requested_count} items. The main answer must contain {requested_count} substantive items, each with a brief explanation; follow-up suggestions cannot replace them."
+                    if requested_count is not None
+                    else "Answer the complete useful core of the request before any optional follow-up suggestions."
+                ),
                 "Location context:",
                 build_location_context(request),
-                f"language: {request.language}",
                 f"interests: {interests}",
                 f"conversation_id: {conversation}",
             ]
