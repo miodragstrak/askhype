@@ -1,3 +1,6 @@
+from contextlib import asynccontextmanager
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,10 +14,24 @@ from app.api.routes.research import router as research_router
 from app.api.routes.usage import router as usage_router
 from app.clients.supabase import validate_supabase_server_config
 from app.core.config import settings
+from app.services.research_worker import reconcile_research_jobs
 
 validate_supabase_server_config(settings)
 
-app = FastAPI(title=settings.app_name)
+@asynccontextmanager
+async def lifespan(_app):
+    async with asyncio.TaskGroup() as tasks:
+        worker = tasks.create_task(reconcile_research_jobs()) if (
+            settings.quota_enforcement_enabled and settings.gemini_research_model
+        ) else None
+        try:
+            yield
+        finally:
+            if worker:
+                worker.cancel()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

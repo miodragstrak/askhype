@@ -434,10 +434,14 @@ export const getUsage = async (options: ApiRequestOptions = {}): Promise<UsageSn
 };
 
 export const startResearch = async (
-  query: string, file: File | null, options: ApiRequestOptions = {},
+  query: string, file: File | null,
+  options: ApiRequestOptions & { conversationId?: string; requestId?: string } = {},
 ): Promise<ResearchJob> => {
   const body = new FormData();
-  body.append('request', JSON.stringify({ query, language: 'sr', depth: 'standard' }));
+  body.append('request', JSON.stringify({
+    query, language: 'sr', depth: 'standard',
+    conversation_id: options.conversationId, request_id: options.requestId,
+  }));
   if (file) body.append('file', file);
   let response: Response;
   try {
@@ -474,16 +478,15 @@ export const getResearch = async (
   return response.json();
 };
 
-export const runResearch = async (
-  query: string, file: File | null, options: ApiRequestOptions = {},
-): Promise<ResearchJob> => {
-  let job = await startResearch(query, file, options);
-  const quota = job.quota;
-  for (let poll = 0; poll < 360 && !['completed', 'failed'].includes(job.status); poll += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 10_000));
-    job = await getResearch(job.research_id, options);
-  }
-  if (!job.quota && quota) job = { ...job, quota };
+export const listResearch = async (conversationId: string, options: ApiRequestOptions): Promise<ResearchJob[]> => {
+  const response = await fetch(`${API_BASE_URL}/api/research?conversation_id=${encodeURIComponent(conversationId)}`, {
+    headers: authHeaders(options.accessToken), signal: options.signal, cache: 'no-store',
+  });
+  if (!response.ok) throw new ApiError('Status istraživanja trenutno nije dostupan.', response.status);
+  return response.json();
+};
+
+export const researchFailureMessage = (job: ResearchJob): string => {
   if (job.status === 'failed') {
     const messages: Record<string, string> = {
       provider_rate_limited: 'Deep Research servis je trenutno dostigao ograničenje provajdera. Pokušajte ponovo kasnije.',
@@ -493,8 +496,7 @@ export const runResearch = async (
       research_failed: 'Deep Research nije uspeo. Pokušajte ponovo kasnije.',
     };
     const code = job.failure_category || 'research_failed';
-    throw new ResearchApiError(messages[code] || messages.research_failed, 502, code);
+    return messages[code] || messages.research_failed;
   }
-  if (job.status !== 'completed' || !job.result) throw new ApiError('Deep Research je prekoračio dozvoljeno vreme.', 504);
-  return job;
+  return '';
 };

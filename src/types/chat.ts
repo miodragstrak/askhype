@@ -43,6 +43,7 @@ export interface ResearchResult {
   model: string;
 }
 export interface ResearchJob {
+  query?: string | null;
   research_id: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   created_at: string;

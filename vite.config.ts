@@ -49,7 +49,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/.*/i,
+            urlPattern: /^https:\/\/(?![^/]+\/api\/research(?:[/?]|$)).*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'offlineCache',

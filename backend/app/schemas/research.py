@@ -14,6 +14,8 @@ class ResearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=3000)
     language: str = Field(default="sr", min_length=2, max_length=10)
     depth: ResearchDepth = "standard"
+    conversation_id: UUID | None = None
+    request_id: UUID | None = None
 
 
 class ResearchSection(BaseModel):
@@ -59,6 +61,7 @@ class ResearchJobResponse(BaseModel):
     result: ResearchResult | None = None
     failure_category: str | None = None
     quota: ResearchQuotaSnapshot | None = None
+    query: str | None = None
 
 
 class ResearchQuotaDetail(BaseModel):

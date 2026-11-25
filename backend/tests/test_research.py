@@ -90,6 +90,41 @@ def test_research_jobs_are_isolated_by_authenticated_owner():
     asyncio.run(_research_jobs_are_isolated_by_authenticated_owner())
 
 
+def test_linked_research_recovers_and_completes_without_browser_polling():
+    from uuid import uuid4
+
+    class TemporarilyUnavailable(FakeProvider):
+        failed_once = False
+
+        async def get_research(self, *args):
+            if not self.failed_once:
+                self.failed_once = True
+                raise AIProviderTimeoutError("temporary")
+            return await super().get_research(*args)
+
+    async def scenario():
+        repository = InMemoryResearchRepository()
+        provider = TemporarilyUnavailable(result())
+        owner = identity()
+        request = ResearchRequest(query="Tema", request_id=uuid4(), conversation_id=uuid4())
+        service = ResearchService(repository, provider)
+        started = await service.start(request, owner)
+        assert (await service.start(request, owner)).research_id == started.research_id
+        rows = await repository.list_conversation(owner.user_id, request.conversation_id)
+        assert len(rows) == 1
+        assert rows[0]["query"] == request.query
+        assert await repository.list_conversation(uuid4(), request.conversation_id) == []
+        worker = ResearchService(repository, provider)
+        with pytest.raises(AIProviderTimeoutError):
+            await worker.reconcile(rows[0])
+        assert rows[0]["status"] == "running"
+        assert (await worker.reconcile(rows[0])).status == "completed"
+        assert (await service.get(started.research_id, owner)).result is not None
+        assert len(repository.jobs) == 1
+
+    asyncio.run(scenario())
+
+
 async def _research_jobs_are_isolated_by_authenticated_owner():
     repository = InMemoryResearchRepository()
     service = ResearchService(repository, FakeProvider(result()))

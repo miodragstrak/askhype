@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from starlette.datastructures import UploadFile
 
 from app.api.dependencies import get_authenticated_identity, get_research_provider, get_research_repository
@@ -12,7 +12,7 @@ from app.providers.research import ResearchProvider
 from app.repositories.research_repository import ResearchLimitReached, ResearchRepository
 from app.schemas.research import ResearchJobResponse, ResearchQuotaDetail, ResearchRequest
 from app.services.document_extraction import MAX_DOCUMENT_BYTES, DocumentValidationError, extract_document
-from app.services.research_service import ResearchDepthNotAllowed, ResearchNotFound, ResearchService
+from app.services.research_service import ResearchDepthNotAllowed, ResearchNotFound, ResearchService, _response
 
 router = APIRouter(prefix="/research", tags=["research"])
 
@@ -24,6 +24,8 @@ async def start_research(request: Request, identity: RequestIdentity = Depends(g
     payload, document = await _parse(request)
     try:
         return await ResearchService(repository, provider).start(payload, identity, document)
+    except ResearchNotFound as exc:
+        raise HTTPException(404, detail="Razgovor nije pronađen.") from exc
     except ResearchLimitReached as exc:
         detail = ResearchQuotaDetail(
             used=exc.used, limit=exc.limit, reset_at=exc.reset_at,
@@ -42,6 +44,13 @@ async def start_research(request: Request, identity: RequestIdentity = Depends(g
         raise HTTPException(503, detail={"code": "provider_rate_limited", "message": "Deep Research servis je trenutno dostigao ograničenje provajdera. Pokušajte ponovo kasnije."}) from exc
     except AIProviderResponseError as exc:
         raise HTTPException(502, detail={"code": "invalid_request", "message": "Deep Research zahtev nije moguće obraditi. Preformulišite pitanje."}) from exc
+
+
+@router.get("", response_model=list[ResearchJobResponse])
+async def list_research(conversation_id: UUID, response: Response, identity: RequestIdentity = Depends(get_authenticated_identity),
+                        repository: ResearchRepository = Depends(get_research_repository)):
+    response.headers["Cache-Control"] = "private, no-store"
+    return [_response(row) for row in await repository.list_conversation(identity.user_id, conversation_id)]
 
 
 @router.get("/{research_id}", response_model=ResearchJobResponse)

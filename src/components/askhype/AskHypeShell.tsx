@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { History, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
-import { PromptLimitError, runResearch, sendChatMessage, sendDocumentAnalysis, sendGenerativeSvgAnimation, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { PromptLimitError, startResearch, sendChatMessage, sendDocumentAnalysis, sendGenerativeSvgAnimation, sendPresentationGeneration, sendXlsxTransformation, type QuotaLimitPayload } from '../../services/chat-api';
+import { ResearchProgress, useResearchJobs } from './ResearchProgress';
 import type { LocalConversation, LocalMessage } from '../../types/conversation';
 import type { ChatResponse, DocumentAction, PendingDocument, PendingImage } from '../../types/chat';
 import { useUsage } from '../../usage';
@@ -32,6 +33,9 @@ const createId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const researchResultId = (messageId: string) =>
+  messageId.slice(0, -1) + (Number.parseInt(messageId.slice(-1), 16) ^ 1).toString(16);
+
 export const AskHypeShell = () => {
   const navigate = useNavigate();
   const { session, user, profile, isLoading: authLoading } = useAuth();
@@ -40,6 +44,7 @@ export const AskHypeShell = () => {
   const [activeId, setActiveId] = useState<string | null>(() => loadActiveConversationId(conversations));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [researchRevision, setResearchRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [quota, setQuota] = useState<QuotaLimitPayload | null>(null);
   const [historyOwner, setHistoryOwner] = useState<string | null>(null);
@@ -49,6 +54,7 @@ export const AskHypeShell = () => {
   const preferences = useMemo(() => storageUtils.getUserPreferences(), []);
   const conversationRepository = useMemo(() => new SupabaseConversationRepository(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null;
+  const research = useResearchJobs(user && historyOwner === user.id ? activeId : null, session?.access_token, researchRevision);
 
   useEffect(() => {
     if (historyOwner === 'guest') saveConversations(conversations);
@@ -208,17 +214,18 @@ export const AskHypeShell = () => {
         };
         result = { data, usage: null };
       } else if (documentAction === 'research') {
-        const job = await runResearch(prompt, document?.file ?? null, { accessToken: session?.access_token });
-        if (!job.result) throw new Error('Deep Research nije vratio rezultat.');
-        const data: ChatResponse = {
-          conversation_id: conversation.serverConversationId || `research_${job.research_id}`,
-          provider: job.result.provider, answer_type: 'deep_research', summary: job.result.summary,
-          recommendations: [], follow_up_actions: [],
-          sources: job.result.sources.map((source) => ({ title: source.title, url: source.url })),
-          generated_at: job.result.generated_at, research: job.result,
-          research_quota_remaining: job.quota?.remaining,
-        };
-        result = { data, usage: null };
+        try {
+          if (!user || !await persistUserMessage) throw new Error('Sačuvajte razgovor na nalogu pre pokretanja istraživanja.');
+          await startResearch(prompt, document?.file ?? null, {
+            accessToken: session?.access_token, conversationId: conversation.id,
+            // Reserve a different UUID from the user message for the durable assistant result.
+            requestId: researchResultId(!appendUser && lastMessage?.role === 'user' ? lastMessage.id : userMessage.id),
+            signal: AbortSignal.timeout(90_000),
+          });
+          return true;
+        } finally {
+          setResearchRevision((value) => value + 1);
+        }
       } else if (documentAction === 'presentation') {
         const presentation = await sendPresentationGeneration(
           prompt, document?.file ?? null, { accessToken: session?.access_token },
@@ -430,8 +437,20 @@ export const AskHypeShell = () => {
           <div className="min-h-0 flex-1 overflow-y-auto">
             {activeConversation?.messages.length ? (
               <ConversationThread
-                messages={activeConversation.messages}
-                loading={loading}
+                messages={[...activeConversation.messages, ...(research.jobs ?? []).flatMap((job): LocalMessage[] => {
+                  const report = job.result;
+                  if (!report || activeConversation.messages.some((message) => message.id === job.research_id)) return [];
+                  return [{
+                    id: job.research_id, role: 'assistant', createdAt: report.generated_at,
+                    response: {
+                      conversation_id: activeConversation.serverConversationId ?? `research_${job.research_id}`,
+                      provider: report.provider, answer_type: 'deep_research', summary: report.summary,
+                      generated_at: report.generated_at, research: report,
+                      sources: report.sources, recommendations: [], follow_up_actions: [],
+                    },
+                  }];
+                })].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))}
+                loading={loading && lastSubmission?.documentAction !== 'research'}
                 loadingLabel={lastSubmission?.documentAction === 'animation' ? 'AskHype kreira animaciju…' : undefined}
                 error={error}
                 quota={quota}
@@ -451,6 +470,17 @@ export const AskHypeShell = () => {
             ) : (
               <EmptyConversation />
             )}
+            <div className="mx-auto max-w-3xl px-3">
+              {loading && lastSubmission?.documentAction === 'research' && lastSubmission.conversationId === activeId && (
+                <p role="status">Deep Research · Slanje zahteva…</p>
+              )}
+              {research.jobs?.filter((job) => job.status !== 'completed').map((job) => (
+                <ResearchProgress key={job.research_id} job={job} />
+              ))}
+              {research.offline && <p role="status">Status istraživanja trenutno nije dostupan.{' '}
+                <button type="button" className="underline" onClick={research.retry}>Osveži status</button>
+              </p>}
+            </div>
             <div ref={bottomRef} />
           </div>
 
