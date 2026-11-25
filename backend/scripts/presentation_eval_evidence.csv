@@ -1,0 +1,9 @@
+record_type,category,value,unit,interpretation
+scope,Rehearsal packages reviewed,24,packages,One internal rehearsal sample
+outcome,Incomplete handoffs,7,packages,Each incomplete package has one primary issue
+primary_issue,Metadata,4,packages,Count within the incomplete handoffs
+primary_issue,Rights check,2,packages,Count within the incomplete handoffs
+primary_issue,Delivery format,1,packages,Count within the incomplete handoffs
+constraint,Decision scope,,,One controlled pilot for approval rather than broad rollout
+constraint,Authority,,,Existing duty editor retains release authorization
+limitation,Generalization,,,Rehearsal counts are not a production defect rate

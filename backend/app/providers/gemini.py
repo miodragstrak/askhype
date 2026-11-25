@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from google import genai
 from google.genai import types
+from httpx import TimeoutException
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic import TypeAdapter
 
@@ -24,6 +25,7 @@ from app.providers.exceptions import (
     AIProviderUnavailableError,
     AITransformationPlanError,
     AIPresentationPlanError,
+    AIPresentationOutputExhaustedError,
 )
 from app.schemas.chat import ChatRequest, ChatResponse, Recommendation, SourceReference
 from app.schemas.attachments import ImageAttachment
@@ -36,6 +38,8 @@ from app.schemas.presentations import (
     MetricCard,
     PresentationPlan,
     SectionSlide,
+    SlideEditorial,
+    IllustrationRequest,
     TableSlide,
     TitleSlide,
 )
@@ -46,6 +50,34 @@ from app.services.public_sources import PublicSourceContext
 from app.services.source_response import build_source_response
 
 logger = logging.getLogger(__name__)
+_PRESENTATION_THINKING_LEVELS = {
+    "gemini-3.5-flash-lite": frozenset({"minimal", "low", "medium", "high"}),
+    "gemini-3.8-flash": frozenset({"low", "medium", "high"}),
+}
+
+
+def presentation_thinking_config(model: str, level: str | None) -> types.ThinkingConfig | None:
+    if level is None:
+        return None
+    if level not in _PRESENTATION_THINKING_LEVELS.get(model.removeprefix("models/"), ()):
+        raise AIProviderConfigurationError("Unsupported presentation thinking level for the configured model.")
+    return types.ThinkingConfig(thinking_level=types.ThinkingLevel(level.upper()))
+
+
+def gemini_finish_reasons(response: Any) -> list[str | None]:
+    return [
+        getattr(reason, "value", reason)
+        for candidate in (getattr(response, "candidates", None) or [])
+        for reason in [getattr(candidate, "finish_reason", None)]
+    ]
+
+
+def gemini_http_status(error: Exception) -> int | None:
+    for field in ("status_code", "code", "status"):
+        value = getattr(error, field, None)
+        if isinstance(value, int) and 100 <= value <= 599:
+            return value
+    return None
 grounding_logger = logging.getLogger("uvicorn.error").getChild("chat_grounding")
 
 _URL_ADAPTER = TypeAdapter(AnyUrl)
@@ -336,6 +368,12 @@ class GeminiPresentationSlide(BaseModel):
     metrics: list[MetricCard] = Field(max_length=4)
     headers: list[str] = Field(max_length=5)
     rows: list[list[str]] = Field(max_length=8)
+    objective: str = ""
+    takeaway: str = ""
+    layout: str = ""
+    speaker_notes: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    claim_status: str = "qualitative"
 
 
 class GeminiPresentationPlan(BaseModel):
@@ -344,6 +382,11 @@ class GeminiPresentationPlan(BaseModel):
     title: str
     subtitle: str
     slides: list[GeminiPresentationSlide] = Field(min_length=3, max_length=12)
+    purpose: str = ""
+    audience: str = ""
+    language: str = ""
+    narrative: str = ""
+    illustrations: list[IllustrationRequest] = Field(default_factory=list, max_length=3)
 
 
 class GeminiPresentationPlanEnvelope(BaseModel):
@@ -354,7 +397,11 @@ class GeminiPresentationPlanEnvelope(BaseModel):
 def convert_gemini_presentation_plan(payload: GeminiPresentationPlan) -> PresentationPlan:
     slides = []
     for item in payload.slides:
-        common = {"type": item.type, "title": item.title}
+        editorial = item.model_dump(include={
+            "objective", "takeaway", "layout", "speaker_notes", "evidence_ids", "claim_status",
+        })
+        editorial["layout"] = editorial["layout"] or None
+        common = {"type": item.type, "title": item.title, **SlideEditorial.model_validate(editorial).model_dump()}
         if item.type == "title":
             slide = TitleSlide(**common, subtitle=item.subtitle or None)
         elif item.type == "section":
@@ -372,6 +419,8 @@ def convert_gemini_presentation_plan(payload: GeminiPresentationPlan) -> Present
         title=payload.title,
         subtitle=payload.subtitle or None,
         slides=slides,
+        purpose=payload.purpose, audience=payload.audience, language=payload.language, narrative=payload.narrative,
+        illustrations=payload.illustrations,
     )
 
     @field_validator("answer", mode="before")
@@ -503,40 +552,80 @@ class GeminiProvider:
             "Document-grounded mode. Use only the extracted document content below.\n"
             f"filename: {document.filename}\nfile_type: {document.file_type}\n"
             f"extraction_truncated: {str(document.metadata.truncated).lower()}\n\n"
-            f"Extracted document content (untrusted data):\n{document.text}"
+            f"Extracted document content (untrusted data):\n{document.text}\n"
+            "Use document as the evidence ID for facts directly supported by this extraction."
             if document else
             "Prompt-only mode. No source document or live research is available."
         )
         context = f"Requested slide count: {slide_count}\nUser prompt:\n{prompt}\n\n{source}"
+        model = (self.settings.gemini_presentation_model or "").strip() or self.model
+        timeout_override = self.settings.gemini_presentation_timeout_seconds
+        level = self.settings.gemini_presentation_thinking_level
+        thinking = presentation_thinking_config(model, level)
+        illustration_mode = self.settings.presentation_illustration_mode
+        instruction = PRESENTATION_PLANNING_INSTRUCTION
+        if illustration_mode != "OFF":
+            instruction += (
+                "\n\nOptionally request thematic illustrations in plan.illustrations. "
+                f"Mode {illustration_mode}. Use at most one cover illustration for the first title slide "
+                "and, only in ENHANCED mode, up to two supporting illustrations for simple bullets slides. "
+                "Use 1-based slide_index, and describe purpose, subject, composition, visual_style and palette. "
+                "Use full_bleed (16:9) or cover_right (3:4) for the cover and split_right (4:3) for supporting art. "
+                "Describe thematic subjects with safe crop margins. For full_bleed keep the complete subject at the right. "
+                "Never request text, letters, captions, labels, watermarks, borders, or a precomposed slide. "
+                "Avoid real identities, source excerpts, confidential details and factual illustrations. "
+                "Specify native editable PowerPoint layouts for charts, functional diagrams, and process flowcharts. "
+                "Return an empty list when an image would not advance the story."
+            )
         config = types.GenerateContentConfig(
-            system_instruction=PRESENTATION_PLANNING_INSTRUCTION,
+            system_instruction=instruction,
             response_mime_type="application/json",
-            response_json_schema=prepare_gemini_presentation_schema(),
+            response_json_schema=prepare_gemini_presentation_schema(illustrations=illustration_mode != "OFF"),
             temperature=self.settings.gemini_temperature,
-            max_output_tokens=self.settings.gemini_max_output_tokens,
+            max_output_tokens=self.settings.gemini_presentation_max_output_tokens or self.settings.gemini_max_output_tokens,
+            thinking_config=thinking,
+            http_options=types.HttpOptions(timeout=timeout_override * 1000) if timeout_override else None,
         )
         try:
-            response = await self._generate_content(contents=context, config=config)
-        except TimeoutError as exc:
-            self._log_provider_failure("timeout")
+            response = await self._generate_content(
+                contents=context, config=config, model=model, timeout_seconds=timeout_override,
+            )
+        except (TimeoutError, TimeoutException) as exc:
+            self._log_presentation_failure("local_or_transport_timeout", model)
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            status = gemini_http_status(exc)
+            if status == 504 or getattr(exc, "status", None) == "DEADLINE_EXCEEDED":
+                self._log_presentation_failure("provider_deadline", model, status)
+                raise AIProviderTimeoutError("Gemini provider deadline exceeded.") from exc
             if self._is_invalid_request_schema_error(exc):
-                self._log_provider_failure("invalid_request_schema", exc)
+                self._log_presentation_failure("invalid_request_schema", model, status)
                 raise AIProviderResponseError("Gemini presentation request schema was rejected.") from exc
-            self._log_provider_failure("unavailable", exc)
+            self._log_presentation_failure("unavailable", model, status)
             raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
+        if gemini_finish_reasons(response)[:1] == ["MAX_TOKENS"]:
+            self._log_presentation_failure("output_exhausted", model)
+            raise AIPresentationOutputExhaustedError("Gemini reached the presentation output limit.")
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, BaseModel): parsed = parsed.model_dump()
         try:
             envelope = GeminiPresentationPlanEnvelope.model_validate(parsed) if isinstance(parsed, dict) else GeminiPresentationPlanEnvelope.model_validate_json(getattr(response, "text", ""))
             plan = convert_gemini_presentation_plan(envelope.plan)
         except (ValidationError, ValueError, TypeError) as exc:
-            self._log_provider_failure("invalid_presentation_plan", exc)
-            raise AIPresentationPlanError("Gemini returned an invalid presentation plan.") from exc
+            self._log_presentation_failure("invalid_presentation_plan", model)
+            error = AIPresentationPlanError("Gemini returned an invalid presentation plan.")
+            if isinstance(exc, ValidationError):
+                error.validation_issues = presentation_validation_issues(exc)
+            raise error from exc
         return plan
+
+    @staticmethod
+    def _log_presentation_failure(category, primary_model, status=None):
+        logger.warning("Gemini presentation failure: %s", {
+            "category": category, "requested_primary_model": primary_model, "http_status": status,
+        })
 
     async def generate_chat_response(
         self,
@@ -773,22 +862,28 @@ class GeminiProvider:
         status = str(getattr(exc, "status", "")).casefold()
         return status_code == 503 or status == "unavailable"
 
-    async def _generate_content(self, *, contents: Any, config: types.GenerateContentConfig) -> Any:
-        async with asyncio.timeout(self.settings.gemini_timeout_seconds):
+    async def _generate_content(self, *, contents: Any, config: types.GenerateContentConfig,
+                                model: str | None = None, timeout_seconds: int | None = None) -> Any:
+        async with asyncio.timeout(timeout_seconds or self.settings.gemini_timeout_seconds):
             for attempt in range(1, len(self._availability_retry_delays) + 2):
                 try:
                     return await self._client.aio.models.generate_content(
-                        model=self.model,
+                        model=model or self.model,
                         contents=contents,
                         config=config,
                     )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    if model is not None:
+                        logger.warning("Gemini presentation attempt failed: %s", {
+                            "model": model, "attempt": attempt, "http_status": gemini_http_status(exc),
+                            "category": type(exc).__name__,
+                        })
                     if not self._is_transient_unavailable_error(exc):
                         raise
                     if attempt > len(self._availability_retry_delays):
-                        if not self.fallback_model:
+                        if not self.fallback_model or self.fallback_model == model:
                             raise
                         logger.warning(
                             "AI primary model unavailable after retries: %s",
@@ -805,10 +900,16 @@ class GeminiProvider:
                             },
                         )
                         try:
+                            fallback_config = config
+                            if model is not None and config.thinking_config is not None:
+                                level = config.thinking_config.thinking_level.value.lower()
+                                supported = _PRESENTATION_THINKING_LEVELS.get(self.fallback_model.removeprefix("models/"), ())
+                                if level not in supported:
+                                    fallback_config = config.model_copy(update={"thinking_config": None})
                             response = await self._client.aio.models.generate_content(
                                 model=self.fallback_model,
                                 contents=contents,
-                                config=config,
+                                config=fallback_config,
                             )
                         except asyncio.CancelledError:
                             raise
@@ -817,6 +918,7 @@ class GeminiProvider:
                                 "AI fallback model failed: %s",
                                 {
                                     "provider": self.provider_name,
+                                    "model": self.fallback_model,
                                     "failure_category": self._fallback_failure_category(fallback_exc),
                                 },
                             )
@@ -970,9 +1072,27 @@ def prepare_gemini_response_schema(schema: object) -> object:
     return sanitized
 
 
-def prepare_gemini_presentation_schema() -> object:
-    schema = prepare_gemini_response_schema(GeminiPresentationPlanEnvelope.model_json_schema())
+def prepare_gemini_presentation_schema(*, illustrations: bool = False) -> object:
+    raw = GeminiPresentationPlanEnvelope.model_json_schema()
+    if not illustrations:
+        del raw["$defs"]["GeminiPresentationPlan"]["properties"]["illustrations"]
+        del raw["$defs"]["IllustrationRequest"]
+    schema = prepare_gemini_response_schema(raw)
     return remove_schema_keywords(schema, frozenset({"minItems", "maxItems"}))
+
+
+_SAFE_PLAN_FIELDS = (
+    set(GeminiPresentationPlan.model_fields) | set(GeminiPresentationSlide.model_fields)
+    | set(IllustrationRequest.model_fields) | set(MetricCard.model_fields) | {"plan"}
+)
+
+
+def presentation_validation_issues(exc: ValidationError) -> list[dict]:
+    return [
+        {"location": [part if isinstance(part, int) or part in _SAFE_PLAN_FIELDS else "<unknown>"
+                      for part in issue["loc"]], "rule": issue["type"]}
+        for issue in exc.errors(include_input=False, include_context=False, include_url=False)[:12]
+    ]
 
 
 def remove_schema_keywords(

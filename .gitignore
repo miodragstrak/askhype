@@ -35,3 +35,6 @@ dist/
 .pytest_cache/
 .backups/
 supabase/.temp/
+
+# Local presentation evaluation artifacts
+/backend/reports/ask-ppt-*/

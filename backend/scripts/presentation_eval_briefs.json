@@ -1,0 +1,23 @@
+[
+  {
+    "id": "media-strategy",
+    "prompt": "Napravi 6 slajdova na srpskom za upravni odbor fiktivne regionalne televizije i produkcije. Odbor bira između ulaganja u nove originalne formate i boljeg iskorišćenja postojećeg kataloga. Timovi imaju zajednički produkcijski kapacitet, a prava na digitalnu distribuciju treba proveriti za svaki naslov. Uporedi opcije, preporuči ograničen pilot i navedi uslove za širenje, odgovorne funkcije i sledeću odluku. Ne izmišljaj prihode, gledanost ni tržišni udeo. U beleškama objasni zašto bi odbor prihvatio ili odbio preporuku."
+  },
+  {
+    "id": "operations-decision",
+    "prompt": "Create 6 slides in English for the COO and the release steering committee. Use only the attached rehearsal record for quantitative claims. Ask for a decision on one controlled pilot. Explain the issue distribution, recommend the first control to test, assign responsibilities, and specify a checkpoint for the next decision. Separate observed results from proposals. Include speaker notes on the small sample and counting rules.",
+    "document": "presentation_eval_evidence.csv"
+  },
+  {
+    "id": "ai-agents",
+    "prompt": "Create 7 slides in English for an operations VP and IT governance lead explaining when AI agents add value. Use an unverified invoice exception as a running hypothetical example. Compare a fixed rules workflow, an assistant drafting a recommendation, and an agent that proposes bounded next actions. Keep approvals and payment authority with humans. Propose a pilot with escalation, a measurement plan and stop criteria. Do not invent savings, vendor capabilities or adoption statistics."
+  },
+  {
+    "id": "education",
+    "prompt": "Napravi 5 slajdova na srpskoj ćirilici za učenike prvog razreda srednje škole o čitanju stubičastih grafikona. Koristi izmišljeni primer: grupa A ima 4, grupa B 7 i grupa C 5 knjiga. Jasno obeleži ilustrativne podatke. Pokaži kako se čitaju osa i jedinica, koliko je razlika između grupa A i B i kako skraćena osa može da utiče na utisak. Završetak treba da sadrži kratku proveru razumevanja, s odgovorom u beleškama."
+  },
+  {
+    "id": "marketing",
+    "prompt": "Create 6 slides in English for the launch team of a fictional refillable travel bottle called LoopTrail. Frame the story around packing for a short trip, the inconvenient choice the traveler faces, the proposed refill routine, and a launch concept for a small outdoor retailer. Use a visual sequence, a concrete channel test and a closing decision request. Use native editable visual elements. Avoid environmental, durability, price or market claims without evidence. Label creative concepts as proposals."
+  }
+]

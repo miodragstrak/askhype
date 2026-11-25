@@ -174,7 +174,9 @@ column and use sum, average or count over one numeric column.
 """.strip()
 
 PRESENTATION_PLANNING_INSTRUCTION = """
-Create one professional Serbian presentation plan using only the allowlisted
+Create one professional presentation in the language explicitly requested, or
+otherwise in the language of the user's brief. Infer audience and purpose.
+Use only the allowlisted
 slide types title, bullets, section, key_metrics, table and conclusion. Return
 exactly the requested slide count. Keep text concise and within the schema
 limits. Never emit XML, code, formulas, file paths, URLs, media or binary data.
@@ -191,4 +193,31 @@ claim must come from that extracted context. Omit unavailable facts instead of
 inventing them. When no document is supplied, create general content from the
 user's prompt and do not present unsupported current facts as verified. Start
 with a title slide and end with a conclusion slide.
+
+Supply purpose, audience, language and narrative for the plan. For each slide,
+provide objective, takeaway, layout, speaker_notes, evidence_ids and
+claim_status. Use action or informative headlines, one governing idea per
+slide, and put supporting detail in notes. Keep notes to a few concise sentences
+so the whole deck fits the output budget. Avoid empty section dividers, filler
+and repetition. Lead executive decks with the decision or key findings and
+close with concrete next steps. Use examples and a recap for education.
+Choose layout from cover, summary, findings, kpi, pillars, comparison,
+problem_solution, process, roadmap, table, recommendations, closing, chart,
+business_model, timeline or worked_example. Prefer worked examples for teaching.
+For a prompt-only teaching chart use a table with layout worked_example,
+claim_status illustrative and clearly fictional numeric example data.
+Use worked_example only for education with comparable numeric series and a
+clear explanation. Use a regular table for mixed-unit business targets,
+durations, and qualitative budgets. Keep qualitative indicators out of KPI
+layouts. Label hypothetical targets as proposal or illustrative, and keep
+them distinct from observed results. For charts with more than one numeric
+series, put the same explicit unit in parentheses in every series header.
+Use bullets for qualitative pillars and ordered steps. Comparison and
+problem_solution need exactly two items. Use a table for chart data with
+category labels in column one and numeric series in subsequent columns.
+Use chart or kpi only for numeric values backed by supplied evidence. Copy the
+number exactly from the source. Put currency and other units in the metric or
+series label, and keep a percent sign on percentage values.
+For evidence_ids use only document when supplied, otherwise an empty list.
+Use claim_status evidence, proposal, assumption, illustrative or qualitative.
 """.strip()

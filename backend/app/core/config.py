@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     ai_provider: Literal["mock", "gemini"] = "mock"
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_presentation_model: str | None = None
+    gemini_presentation_max_output_tokens: int | None = Field(default=None, ge=1024, le=8192)
+    gemini_presentation_timeout_seconds: int | None = Field(default=None, ge=1, le=180)
+    gemini_presentation_thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+    presentation_illustration_mode: Literal["OFF", "COVER", "ENHANCED"] = "OFF"
+    presentation_illustration_timeout_seconds: int = Field(default=18, ge=1, le=45)
+    gemini_presentation_image_model: str = "gemini-3.1-flash-lite-image"
     gemini_fallback_model: str | None = None
     gemini_timeout_seconds: int = Field(default=45, gt=0)
     gemini_temperature: float = 0.4

@@ -1,7 +1,7 @@
 import io
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from pptx import Presentation
@@ -19,6 +19,9 @@ from app.schemas.presentations import (
     SectionSlide, TableSlide, TitleSlide,
 )
 from app.services.chat_service import UnsupportedAIProviderError
+from app.services.executive_pptx import render_executive, verify_quantitative_evidence
+from app.services.presentation_diagnostics import PresentationDiagnostics, PresentationRuleError
+from app.services.presentation_illustrations import resolve_gemini_illustrations
 
 MARINE = RGBColor(0x0B, 0x12, 0x20)
 WHITE = RGBColor(0xF8, 0xFA, 0xFC)
@@ -61,24 +64,60 @@ class PresentationGenerationService:
         return self.provider.provider_name
 
     async def generate(self, prompt: str, document: ExtractedDocument | None) -> PresentationResult:
-        count, warnings = requested_slide_count(prompt)
+        count, _ = requested_slide_count(prompt)
         plan = await self.provider.generate_presentation_plan(prompt, count, document)
-        if len(plan.slides) != count:
-            raise PresentationGenerationError(f"Plan mora imati tačno {count} slajdova.")
-        content = render_presentation(plan)
-        return PresentationResult(
-            content=content,
-            filename=_safe_filename(plan.title),
-            slide_count=count,
-            summary=f"Prezentacija „{plan.title}” je napravljena sa {count} slajdova.",
-            warnings=warnings,
-        )
+        trace = PresentationDiagnostics()
+        result = build_presentation(prompt, plan, document, trace)
+        if settings.presentation_illustration_mode != "OFF" and self.provider_name == "gemini":
+            images = await resolve_gemini_illustrations(plan, settings, trace.resolved_layouts)
+            result = apply_illustrations(result, plan, document, images)
+        return result
 
     @staticmethod
     def _provider_from_settings() -> AIProvider:
         if settings.ai_provider == "mock": return MockAIProvider()
         if settings.ai_provider == "gemini": return GeminiProvider()
         raise UnsupportedAIProviderError(f"Unsupported AI_PROVIDER value: {settings.ai_provider}")
+
+
+def build_presentation(
+    prompt: str, plan: PresentationPlan, document: ExtractedDocument | None,
+    diagnostics: PresentationDiagnostics | None = None,
+) -> PresentationResult:
+    trace = diagnostics or PresentationDiagnostics()
+    count, warnings = requested_slide_count(prompt)
+    with trace.measure("validate_slide_count", "validation"):
+        if len(plan.slides) != count:
+            raise PresentationGenerationError(f"Plan mora imati tačno {count} slajdova.") from (
+                PresentationRuleError("slide_count", "Validated plan does not match the requested slide count.")
+            )
+    try:
+        if document:
+            with trace.measure("verify_evidence", "validation"):
+                verify_quantitative_evidence(plan, document.text, trace)
+        content = render_executive(plan, {"document"} if document else set(), diagnostics=trace)
+    except ValueError as exc:
+        raise PresentationGenerationError(
+            "Plan prezentacije ne ispunjava pravila za sadržaj, izvore ili raspored slajdova."
+        ) from exc
+    return PresentationResult(
+        content=content,
+        filename=_safe_filename(plan.title),
+        slide_count=count,
+        summary=f"Prezentacija „{plan.title}” je napravljena sa {count} slajdova.",
+        warnings=warnings,
+    )
+
+
+def apply_illustrations(result, plan, document, images):
+    if not images:
+        return result
+    try:
+        content = render_executive(plan, {"document"} if document else set(), illustrations=images)
+    except Exception:
+        # The native deck already passed the complete production validation path.
+        return result
+    return replace(result, content=content)
 
 
 def render_presentation(plan: PresentationPlan) -> bytes:

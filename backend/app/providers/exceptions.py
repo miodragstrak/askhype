@@ -30,5 +30,9 @@ class AIPresentationPlanError(AIProviderResponseError):
     """The provider did not produce a safe, supported presentation plan."""
 
 
+class AIPresentationOutputExhaustedError(AIPresentationPlanError):
+    """Gemini reported a token-limit finish before completing the plan."""
+
+
 class AIAnimationPlanError(AIProviderResponseError):
     """The provider did not produce a safe, supported animation plan."""

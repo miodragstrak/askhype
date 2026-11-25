@@ -414,6 +414,127 @@ def test_document_backed_presentation_plan_is_explicitly_grounded() -> None:
     assert "Never emit XML, code" in instruction
 
 
+def test_dedicated_presentation_model_does_not_replace_chat_model() -> None:
+    models = FakeModels(FakeResponse(parsed=_presentation_payload()))
+    configured = _settings().model_copy(update={
+        "gemini_presentation_model": "presentation-test-model",
+        "gemini_presentation_max_output_tokens": 6144,
+    })
+    provider = GeminiProvider(app_settings=configured, client=FakeClient(models))
+    asyncio.run(provider.generate_presentation_plan("Create 3 slides", 3, None))
+    assert len(models.calls) == 1
+    assert models.calls[0]["model"] == "presentation-test-model"
+    assert models.calls[0]["config"].max_output_tokens == 6144
+    assert provider.model == configured.gemini_model
+
+
+def test_presentation_resources_override_both_deadlines_without_changing_chat(monkeypatch):
+    delays = []
+    original_timeout = asyncio.timeout
+
+    def capture_timeout(delay):
+        delays.append(delay)
+        return original_timeout(delay)
+
+    monkeypatch.setattr(asyncio, "timeout", capture_timeout)
+    models = SequencedModels([
+        FakeResponse(parsed=_presentation_payload()),
+        FakeResponse(parsed={"answer": "A normal answer."}),
+    ])
+    configured = _settings().model_copy(update={
+        "gemini_presentation_model": "gemini-3.8-flash",
+        "gemini_presentation_timeout_seconds": 60,
+        "gemini_presentation_thinking_level": "low",
+    })
+    provider = GeminiProvider(configured, FakeClient(models))
+    asyncio.run(provider.generate_presentation_plan("Create 3 slides", 3, None))
+    asyncio.run(provider.generate_chat_response(ChatRequest(message="Explain DNS.")))
+    assert delays == [60, configured.gemini_timeout_seconds]
+    presentation, chat = models.calls
+    assert presentation["config"].http_options.timeout == 60_000
+    assert presentation["config"].thinking_config.thinking_level.value == "LOW"
+    assert presentation["config"].thinking_config.thinking_budget is None
+    assert chat["model"] == configured.gemini_model
+    assert chat["config"].http_options is None and chat["config"].thinking_config is None
+
+
+def test_installed_sdk_serializes_presentation_timeout_and_thinking_without_network():
+    from google import genai
+    from google.genai import types
+
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return httpx.Response(200, json={"candidates": [{
+            "content": {"parts": [{"text": json.dumps(_presentation_payload())}], "role": "model"},
+            "finishReason": "STOP",
+        }]})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as http:
+            client = genai.Client(api_key="synthetic-key", http_options=types.HttpOptions(
+                timeout=45_000, httpx_async_client=http,
+            ))
+            async with client.aio:
+                config = _settings().model_copy(update={
+                    "gemini_presentation_model": "gemini-3.8-flash",
+                    "gemini_presentation_thinking_level": "low",
+                    "gemini_presentation_timeout_seconds": 60,
+                })
+                await GeminiProvider(config, client).generate_presentation_plan("Create 3 slides", 3, None)
+
+    asyncio.run(run())
+    request, = requests
+    assert request.url.path.endswith("/models/gemini-3.8-flash:generateContent")
+    assert request.headers["X-Server-Timeout"] == "60"
+    assert request.extensions["timeout"]["read"] == 60
+    thinking = json.loads(request.content)["generationConfig"]["thinkingConfig"]
+    assert thinking in ({"thinking_level": "LOW"}, {"thinkingLevel": "LOW"})
+
+
+@pytest.mark.parametrize(("model", "level", "accepted"), [
+    ("gemini-3.5-flash-lite", "minimal", True), ("gemini-3.8-flash", "minimal", False),
+    ("gemini-3.8-flash", "low", True), ("unknown-model", "high", False),
+    ("unknown-model", None, True),
+])
+def test_presentation_thinking_config_compatibility(model, level, accepted):
+    from app.providers.gemini import presentation_thinking_config
+
+    if not accepted:
+        with pytest.raises(AIProviderConfigurationError):
+            presentation_thinking_config(model, level)
+    elif level:
+        assert presentation_thinking_config(model, level).thinking_level.value == level.upper()
+    else:
+        assert presentation_thinking_config(model, level) is None
+
+
+def test_presentation_provider_504_reports_actual_model_without_raw_error(caplog):
+    models = FakeModels(exc=FakeSdkError("private provider error text", 504))
+    provider = GeminiProvider(_settings().model_copy(update={
+        "gemini_presentation_model": "gemini-3.8-flash",
+    }), FakeClient(models))
+    with pytest.raises(AIProviderTimeoutError):
+        asyncio.run(provider.generate_presentation_plan("Create 3 slides", 3, None))
+    assert "gemini-3.8-flash" in caplog.text and "provider_deadline" in caplog.text
+    assert "private provider error text" not in caplog.text
+    assert len(models.calls) == 1
+
+
+@pytest.mark.parametrize("reason", ["MAX_TOKENS", "STOP", None])
+def test_incomplete_presentation_requires_finish_reason_to_classify_exhaustion(reason):
+    from types import SimpleNamespace
+    from app.providers.exceptions import AIPresentationOutputExhaustedError
+
+    response = FakeResponse(text='{"plan":{"title":"incomplete')
+    response.candidates = [SimpleNamespace(finish_reason=reason)]
+    provider = GeminiProvider(_settings(), FakeClient(FakeModels(response)))
+    with pytest.raises(AIPresentationPlanError) as caught:
+        asyncio.run(provider.generate_presentation_plan("Create 3 slides", 3, None))
+    assert isinstance(caught.value, AIPresentationOutputExhaustedError) is (reason == "MAX_TOKENS")
+
+
 def test_prompt_only_presentation_is_distinguished_and_malformed_plan_rejected() -> None:
     models = FakeModels(FakeResponse(parsed={"plan": {"title": "X", "slides": [{"type": "chart"}]}}))
     provider = GeminiProvider(app_settings=_settings(), client=FakeClient(models))
@@ -431,7 +552,7 @@ def test_gemini_facing_presentation_schema_is_flat_without_union_keywords() -> N
     slide_schema = schema["properties"]["plan"]["properties"]["slides"]["items"]
 
     assert len(_find_key(schema_before_array_normalization, "minItems")) == 1
-    assert len(_find_key(schema_before_array_normalization, "maxItems")) == 5
+    assert len(_find_key(schema_before_array_normalization, "maxItems")) == 6
     assert _find_key(schema, "oneOf") == []
     assert _find_key(schema, "anyOf") == []
     assert _find_key(schema, "const") == []
@@ -498,8 +619,10 @@ def test_raw_presentation_schema_exposes_gemini_incompatible_union_keywords() ->
 
     assert len(_find_key(raw, "discriminator")) == 1
     assert len(_find_key(raw, "const")) == 6
-    assert len(_find_key(raw, "minLength")) == 11
-    assert len(_find_key(raw, "maxLength")) == 16
+    assert raw["$defs"]["IllustrationRequest"]["properties"]["purpose"]["minLength"] == 1
+    assert raw["$defs"]["BulletsSlide"]["properties"]["title"]["minLength"] == 1
+    assert raw["$defs"]["BulletsSlide"]["properties"]["speaker_notes"]["maxLength"] == 1200
+    assert raw["$defs"]["PresentationPlan"]["properties"]["audience"]["maxLength"] == 100
     assert len(_find_key(raw, "oneOf")) == 1
 
 
