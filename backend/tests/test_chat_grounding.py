@@ -3,6 +3,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import httpx
+from uuid import uuid4
+from app.main import app
 
 from app.core.config import Settings
 from app.providers.gemini import GeminiProvider
@@ -58,7 +61,21 @@ def web_chunk(title: str | None, url: str | None) -> Any:
     return SimpleNamespace(web=SimpleNamespace(title=title, uri=url))
 
 
+PRODUCTION_PROMPTS = (
+    "Koji su najzanimljiviji kulturni događaji u Beogradu ovog vikenda?",
+    "Pretraži internet i pronađi tri konkretna kulturna događaja u Beogradu za 28. i 29. novembar 2026. godine. Navedi naziv događaja, datum, lokaciju i link do izvora. Nemoj izmišljati podatke.",
+)
+
+
 @pytest.mark.parametrize("message", (
+    *PRODUCTION_PROMPTS,
+    "Који су концерти у Београду наредног викенда?",
+    "Koje su izložbe sljedećeg vikenda?",
+    "What exhibitions are on this weekend?",
+    "Koje su izložbe 28. i 29. novembra?",
+    "Претражи интернет за тај податак.",
+    "Look up online how the policy changed.",
+    "Koja je cijena zlata ovog mjeseca?",
     "daj mi prognozu za tri dana za Beograd",
     "Kakva je prognoza za sutra u Beogradu? Odgovori na italijanskom.",
     "Ko je trenutno predsednik Evropske komisije?",
@@ -68,7 +85,12 @@ def test_freshness_sensitive_messages_enable_grounding(message: str) -> None:
     assert decide_chat_grounding(message).enabled is True
 
 
-@pytest.mark.parametrize("message", ("What is an AI agent?", "Objasni mi kako radi DNS."))
+@pytest.mark.parametrize("message", (
+    "What is an AI agent?", "Objasni mi kako radi DNS.",
+    "Napiši priču o koncertu večeras.", "Prevedi: pretraži internet.",
+    "Izračunaj koliko je 42 + 5 danas.", "What if the market crashed tomorrow?",
+    "I feel better today.",
+))
 def test_evergreen_messages_disable_grounding(message: str) -> None:
     assert decide_chat_grounding(message).enabled is False
 
@@ -100,7 +122,7 @@ def test_serbian_weather_uses_google_search_and_maps_deduplicated_sources() -> N
 
 
 def test_grounding_preserves_explicit_italian_language_rule() -> None:
-    models = FakeModels([grounded_response("Domani a Belgrado...", [])])
+    models = FakeModels([grounded_response("Domani a Belgrado...", [web_chunk("Source", "https://example.test/weather")])])
     provider = GeminiProvider(settings(), FakeClient(models))
     result = asyncio.run(provider.generate_chat_response(
         ChatRequest(message="Kakva je prognoza za sutra u Beogradu? Odgovori na italijanskom."),
@@ -118,23 +140,81 @@ def test_missing_grounding_metadata_does_not_fabricate_sources() -> None:
         ChatRequest(message="Šta je trenutno aktuelno?"), enable_grounding=True,
     ))
     assert result.sources == []
+    assert result.summary != "Aktuelni odgovor."
 
 
-def test_grounding_failure_retries_without_search_and_requires_unverified_answer() -> None:
-    models = FakeModels([
-        InvalidGroundingRequest("search tool unavailable"),
-        grounded_response("Ne mogu trenutno da proverim podatke uživo.", []),
-    ])
+@pytest.mark.parametrize("failure", [
+    InvalidGroundingRequest("private provider details"), TimeoutError(),
+    SimpleNamespace(parsed=None, text="{malformed"),
+    grounded_response("Unsupported claim", [web_chunk("Bad", "https://[broken")]),
+])
+def test_grounding_failure_returns_safe_limitation_without_second_call(failure) -> None:
+    models = FakeModels([failure])
     provider = GeminiProvider(settings(), FakeClient(models))
     result = asyncio.run(provider.generate_chat_response(
         ChatRequest(message="Kakvo je vreme danas?"), enable_grounding=True,
     ))
-    assert len(models.calls) == 2
+    assert len(models.calls) == 1
     assert models.calls[0]["config"].tools[0].google_search is not None
-    assert models.calls[1]["config"].tools is None
-    assert "Live search could not be used" in models.calls[1]["config"].system_instruction
-    assert result.summary.startswith("Ne mogu")
+    assert "couldn't verify" in result.summary or "potvrdim" in result.summary
     assert result.sources == []
+
+
+def test_grounding_cancellation_propagates() -> None:
+    models = FakeModels([asyncio.CancelledError()])
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(GeminiProvider(settings(), FakeClient(models)).generate_chat_response(
+            ChatRequest(message=PRODUCTION_PROMPTS[0]), enable_grounding=True,
+        ))
+    assert len(models.calls) == 1
+
+
+@pytest.mark.parametrize("hype", [False, True])
+def test_specialized_routes_take_precedence_over_explicit_search(hype):
+    class Reader:
+        async def retrieve(self, message):
+            assert not hype
+            return SimpleNamespace(documents=[object()])
+
+    class Retriever:
+        async def retrieve(self, message):
+            assert hype
+            return object()
+
+    class Provider:
+        async def generate_chat_response(self, request, **kwargs):
+            return kwargs
+
+    service = ChatService(provider=Provider(), retriever=Retriever(), source_reader=Reader())
+    message = f"Pretraži internet za {'Hype TV' if hype else 'vesti'} https://example.test/"
+    arguments = asyncio.run(service.generate_response(ChatRequest(message=message)))
+    assert arguments["hype_context" if hype else "source_context"] is not None
+    assert not arguments.get("enable_grounding")
+
+
+@pytest.mark.parametrize("message", PRODUCTION_PROMPTS)
+@pytest.mark.parametrize("provider_error", [False, True])
+def test_production_prompts_reach_search_and_charge_once(monkeypatch, message, provider_error):
+    outcome = InvalidGroundingRequest("private details") if provider_error else grounded_response(
+        "Događaj", [web_chunk("Program", "https://example.test/program")],
+    )
+    models = FakeModels([outcome])
+    provider = GeminiProvider(settings(), FakeClient(models))
+    monkeypatch.setattr(ChatService, "_provider_from_settings", lambda self: provider)
+    headers = {"X-Anonymous-ID": str(uuid4())}
+
+    async def send():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            result = await client.post("/api/chat", headers=headers, json={"message": message})
+            usage = await client.get("/api/usage", headers=headers)
+            return result, usage
+
+    result, usage = asyncio.run(send())
+    assert result.status_code == 200
+    assert usage.json()["used"] == 1
+    assert len(models.calls) == 1
+    assert models.calls[0]["config"].tools[0].google_search is not None
+    assert bool(result.json()["sources"]) is not provider_error
 
 
 def test_chat_service_passes_grounding_only_for_fresh_ordinary_chat() -> None:
@@ -158,7 +238,9 @@ def test_chat_service_passes_grounding_only_for_fresh_ordinary_chat() -> None:
 
 
 def test_image_chat_keeps_natural_grounded_request_contract() -> None:
-    models = FakeModels([grounded_response("The current product is shown in the image.", [])])
+    models = FakeModels([grounded_response("The current product is shown in the image.", [
+        web_chunk("Product", "https://example.test/product"),
+    ])])
     provider = GeminiProvider(settings(), FakeClient(models))
     result = asyncio.run(provider.generate_chat_response(
         ChatRequest(message="What is the current version of this product?"),

@@ -46,6 +46,7 @@ from app.services.public_sources import PublicSourceContext
 from app.services.source_response import build_source_response
 
 logger = logging.getLogger(__name__)
+grounding_logger = logging.getLogger("uvicorn.error").getChild("chat_grounding")
 
 _URL_ADAPTER = TypeAdapter(AnyUrl)
 _UNSUPPORTED_GEMINI_SCHEMA_KEYS = frozenset({
@@ -564,20 +565,19 @@ class GeminiProvider:
                 contents = [types.Part.from_text(text=user_context)]
                 contents.extend(types.Part.from_bytes(data=image.data, mime_type=image.content_type) for image in images)
             try:
+                if grounded_ordinary_chat:
+                    grounding_logger.info("chat_grounding %s", {"outcome": "tool_supplied", "model": self.model})
                 response = await self._generate_content(contents=contents, config=config)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 if not grounded_ordinary_chat:
                     raise
-                logger.warning(
-                    "Ordinary chat grounding failed; retrying without search: %s",
-                    {"ordinary_chat_grounding_enabled": True, "failure_category": "grounding_unavailable"},
-                )
-                fallback_config = self._build_generation_config(
-                    hype_context, source_context, bool(images), False, grounding_unavailable=True,
-                )
-                response = await self._generate_content(contents=contents, config=fallback_config)
+                grounding_logger.warning("chat_grounding %s", {
+                    "outcome": "provider_error",
+                    "category": "timeout" if isinstance(exc, TimeoutError) else self._fallback_failure_category(exc),
+                })
+                return self._grounding_limitation(request)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
@@ -594,7 +594,14 @@ class GeminiProvider:
             raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
 
         payload_type = self._payload_type(hype_context, source_context)
-        payload = self._parse_payload(response, payload_type)
+        grounding_sources = self._grounding_sources(response) if grounded_ordinary_chat else []
+        try:
+            payload = self._parse_payload(response, payload_type)
+        except AIProviderResponseError:
+            if not grounded_ordinary_chat:
+                raise
+            grounding_logger.warning("chat_grounding %s", {"outcome": "invalid_response"})
+            return self._grounding_limitation(request)
         if hype_context is not None:
             return build_hype_response(
                 hype_context,
@@ -612,14 +619,13 @@ class GeminiProvider:
                 actions=payload.follow_up_actions,
             )
         assert isinstance(payload, GeminiNaturalChatPayload)
-        grounding_sources = self._grounding_sources(response) if grounded_ordinary_chat else []
-        logger.info(
-            "Ordinary chat grounding result: %s",
-            {
-                "ordinary_chat_grounding_enabled": grounded_ordinary_chat,
-                "grounding_source_count": len(grounding_sources),
-            },
-        )
+        if grounded_ordinary_chat:
+            grounding_logger.info("chat_grounding %s", {
+                "outcome": "sources_returned" if grounding_sources else "no_usable_sources",
+                "source_count": len(grounding_sources),
+            })
+            if not grounding_sources:
+                return self._grounding_limitation(request)
         return ChatResponse(
             conversation_id=request.conversation_id or f"conv_{uuid4()}",
             provider=self.provider_name,
@@ -627,6 +633,31 @@ class GeminiProvider:
             summary=payload.answer,
             recommendations=[], follow_up_actions=[], sources=grounding_sources,
             generated_at=datetime.now(UTC),
+        )
+
+    def _grounding_limitation(self, request: ChatRequest) -> ChatResponse:
+        grounding_logger.info("chat_grounding %s", {"outcome": "ungrounded_fallback"})
+        language = resolve_output_language(request.message, request.language).language
+        if language == "the language of the latest message" and re.search(
+            r"\b(?:kakva|koje|pretrazi|pronadji|proveri|prognozu)\b", _language_search_text(request.message),
+        ):
+            language = "Serbian"
+        messages = {
+            "Serbian": "Nisam mogao da potvrdim aktuelne informacije iz pouzdanih izvora.",
+            "Croatian": "Nisam mogao potvrditi aktualne informacije iz pouzdanih izvora.",
+            "Italian": "Non ho potuto verificare le informazioni aggiornate con fonti affidabili.",
+            "German": "Ich konnte die aktuellen Informationen nicht anhand verlässlicher Quellen überprüfen.",
+            "French": "Je n’ai pas pu vérifier les informations actuelles auprès de sources fiables.",
+            "Spanish": "No pude verificar la información actual con fuentes fiables.",
+        }
+        summary = messages.get(language, "I couldn't verify the current information with reliable sources.")
+        if language == "Serbian" and re.search(r"[а-я]", request.message.casefold()):
+            summary = "Нисам могао да потврдим актуелне информације из поузданих извора."
+        return ChatResponse(
+            conversation_id=request.conversation_id or f"conv_{uuid4()}",
+            provider=self.provider_name, answer_type="chat",
+            summary=summary,
+            recommendations=[], follow_up_actions=[], sources=[], generated_at=datetime.now(UTC),
         )
 
     def _build_client(self, app_settings: Settings) -> genai.Client:
@@ -657,7 +688,6 @@ class GeminiProvider:
         source_context: PublicSourceContext | None = None,
         has_images: bool = False,
         enable_grounding: bool = False,
-        grounding_unavailable: bool = False,
     ) -> types.GenerateContentConfig:
         payload_type = self._payload_type(hype_context, source_context)
         response_schema = prepare_gemini_response_schema(payload_type.model_json_schema())
@@ -673,11 +703,6 @@ class GeminiProvider:
                 "\n\nGoogle Search grounding is enabled for this freshness-sensitive request. "
                 "Use search-grounded information for current claims, preserve the requested output language, "
                 "and never invent facts or source URLs."
-            )
-        elif grounding_unavailable:
-            instruction += (
-                "\n\nLive search could not be used for this request. Do not fabricate current information. "
-                "Give a useful natural response that clearly says the live facts could not be verified."
             )
         return types.GenerateContentConfig(
             system_instruction=instruction,
@@ -698,7 +723,7 @@ class GeminiProvider:
             return []
         sources: list[SourceReference] = []
         seen_urls: set[str] = set()
-        for candidate in candidates:
+        for candidate in candidates[:1]:
             metadata = field(candidate, "grounding_metadata")
             chunks = field(metadata, "grounding_chunks")
             if not isinstance(chunks, list):
@@ -710,7 +735,14 @@ class GeminiProvider:
                 if not isinstance(url, str) or not url.strip():
                     continue
                 url = url.strip()
-                if urlsplit(url).scheme.casefold() not in {"http", "https"}:
+                try:
+                    parsed = urlsplit(url)
+                    usable = (parsed.scheme in {"http", "https"} and parsed.hostname
+                              and not parsed.username and not parsed.password
+                              and not any(char.isspace() or ord(char) < 32 for char in url))
+                except ValueError:
+                    usable = False
+                if not usable:
                     continue
                 if url in seen_urls:
                     continue

@@ -11,7 +11,7 @@ from app.services.public_sources import PublicSourceReader, public_source_reader
 from app.services.source_response import build_source_response
 from app.services.chat_grounding import decide_chat_grounding
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error").getChild("chat_grounding")
 
 
 class UnsupportedAIProviderError(RuntimeError):
