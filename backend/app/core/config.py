@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     animation_render_timeout_seconds: int = Field(default=100, gt=0, le=180)
     research_max_depth: Literal["quick", "standard", "deep"] = "standard"
     server_chat_turns_enabled: bool = False
+    chat_turn_worker_capacity: int = Field(default=16, ge=1, le=128)
+    chat_turn_shutdown_drain_seconds: float = Field(default=15, ge=0, le=120)
     quota_enforcement_enabled: bool = False
     supabase_url: str | None = None
     supabase_secret_key: SecretStr | None = None

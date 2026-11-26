@@ -54,3 +54,11 @@ SQL
     [[ "$(cat "$work/one" "$work/two" | awk '/^(true|false)$/ {print}' | sort)" == $'false\ntrue' ]]
     echo "PASS $database: schema, settlement, ownership, pagination, concurrent claim"
 done
+
+if [[ "${RUN_CHAT_TURN_PROCESS_TESTS:-0}" == 1 ]]; then
+    (
+        cd "$root/backend"
+        ASKHYPE_CHAT_TEST_POSTGRES_SOCKET="$work" ASKHYPE_CHAT_TEST_PSQL="$pgbin/psql" \
+            "${CHAT_TURN_TEST_PYTHON:-python3}" -m pytest -q tests/test_chat_turn_processes.py
+    )
+fi

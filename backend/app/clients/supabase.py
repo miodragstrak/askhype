@@ -2,6 +2,7 @@ from functools import lru_cache
 from typing import Any
 
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 from app.core.config import Settings, settings
 from app.providers.exceptions import AIProviderConfigurationError
@@ -25,14 +26,15 @@ def validate_supabase_server_config(app_settings: Settings = settings) -> None:
 
 
 @lru_cache
-def get_supabase_admin_client() -> Client:
+def get_supabase_admin_client(postgrest_timeout: int | None = None) -> Client:
     validate_supabase_server_config(settings)
     if not settings.supabase_url or settings.supabase_secret_key is None:
         raise AIProviderConfigurationError("Supabase server client is not configured.")
-    return create_client(
-        settings.supabase_url,
-        _secret_value(settings.supabase_secret_key),
-    )
+    url = settings.supabase_url
+    key = _secret_value(settings.supabase_secret_key)
+    if postgrest_timeout is None:
+        return create_client(url, key)
+    return create_client(url, key, options=SyncClientOptions(postgrest_client_timeout=postgrest_timeout))
 
 
 class SupabaseAuthVerifier:

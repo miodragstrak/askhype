@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import logging
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -16,9 +15,11 @@ from app.providers.exceptions import (
 )
 from app.schemas.attachments import ImageAttachment
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.services.chat_turn_supervisor import TurnTrace
 from app.services.chat_service import ChatService, UnsupportedAIProviderError
 
-logger = logging.getLogger(__name__)
+RPC_DEADLINE_SECONDS = 10
+RPC_TRANSPORT_TIMEOUT_SECONDS = 8
 
 
 class ChatTurn(BaseModel):
@@ -44,7 +45,7 @@ class ChatTurnRepository:
     async def _rpc(self, name, values):
         params = {key: str(value) if isinstance(value, UUID) else value for key, value in values.items()}
         def execute():
-            return get_supabase_admin_client().rpc(name, params).execute().data
+            return get_supabase_admin_client(RPC_TRANSPORT_TIMEOUT_SECONDS).rpc(name, params).execute().data
 
         return await asyncio.to_thread(execute)
 
@@ -73,17 +74,37 @@ _FAILURES = {
 }
 
 
-async def execute_claimed_turn(repository, user, turn, request, images):
+async def run_chat_turn(repository, user, turn, conversation, request, images, create, trace: TurnTrace):
+    try:
+        async with asyncio.timeout(RPC_DEADLINE_SECONDS):
+            admission = await repository.accept(user, turn, conversation, request, images, create)
+    except Exception as exc:
+        trace.event("database_claim_failed", warning=True, category=type(exc).__name__)
+        raise ChatTurnAdmissionUnavailable() from None
+    outcome = admission.get("error") or ("claimed" if admission["claimed"] else "duplicate")
+    trace.event("database_claim", outcome=outcome)
+    if admission.get("claimed"):
+        admission = {**admission, "turn": await execute_claimed_turn(repository, user, turn, request, images, trace)}
+    return admission
+
+
+class ChatTurnAdmissionUnavailable(RuntimeError):
+    pass
+
+
+async def execute_claimed_turn(repository, user, turn, request, images, trace: TurnTrace):
     """Run only for the transaction winner. Settlement retry never re-enters generation."""
     response = None
     failure = None
     status = "completed"
+    trace.event("provider_started")
     try:
         async with asyncio.timeout(120):
             service = ChatService()
             response = (await service.generate_response(request, images) if images
                         else await service.generate_response(request))
     except asyncio.CancelledError:
+        trace.event("provider_cancelled")
         # Admission is already durable. A later status read expires an abandoned claim.
         raise
     except (TimeoutError, AIProviderTimeoutError):
@@ -94,14 +115,18 @@ async def execute_claimed_turn(repository, user, turn, request, images):
     except tuple(_FAILURES) as exc:
         status, failure = "failed", next(code for error, code in _FAILURES.items() if isinstance(exc, error))
     except Exception as exc:
-        logger.warning("chat_turn_execution_error turn=%s category=%s", turn, type(exc).__name__)
+        trace.event("provider_error", warning=True, category=type(exc).__name__)
         status, failure = "unknown", "execution_error"
 
-    for _ in range(2):
+    trace.event("provider_finished", outcome=failure or status)
+    for attempt in (1, 2):
         try:
-            return await repository.finish(user, turn, status, response, failure)
+            async with asyncio.timeout(RPC_DEADLINE_SECONDS):
+                row = await repository.finish(user, turn, status, response, failure)
+            trace.event("settlement_finished", outcome=row["status"] if row else "deleted", attempt=attempt)
+            return row
         except Exception as exc:
-            logger.warning("chat_turn_settlement_error turn=%s category=%s", turn, type(exc).__name__)
+            trace.event("settlement_error", warning=True, category=type(exc).__name__, attempt=attempt)
     raise ChatTurnSettlementUnavailable()
 
 

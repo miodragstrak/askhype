@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from uuid import UUID
@@ -11,7 +12,10 @@ from starlette.datastructures import UploadFile
 from app.api.dependencies import get_authenticated_identity, get_request_identity, get_usage_service
 from app.auth.identity import RequestIdentity
 from app.core.config import settings
-from app.services.chat_turns import ChatTurn, ChatTurnRepository, ChatTurnSettlementUnavailable, execute_claimed_turn
+from app.services.chat_turn_supervisor import SupervisorUnavailable
+from app.services.chat_turns import (
+    ChatTurn, ChatTurnAdmissionUnavailable, ChatTurnRepository, run_chat_turn,
+)
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -128,13 +132,26 @@ async def submit_chat_turn(
     repository: ChatTurnRepository = Depends(get_chat_turn_repository),
 ):
     request, images = await _parse_chat_request(http_request)
+    supervisor = http_request.app.state.chat_turn_supervisor
+    user_id = identity.user_id
+
     try:
-        admission = await repository.accept(
-            identity.user_id, turn_id, conversation_id, request, images, create_conversation,
-        )
-    except Exception as exc:
-        logger.warning("chat_turn_admission_error turn=%s category=%s", turn_id, type(exc).__name__)
+        task, trace = supervisor.start(turn_id, lambda trace: run_chat_turn(
+            repository, user_id, turn_id, conversation_id, request, images, create_conversation, trace,
+        ))
+    except SupervisorUnavailable:
+        raise HTTPException(503, "Obrada razgovora je trenutno zauzeta.") from None
+    try:
+        admission = await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if asyncio.current_task().cancelling():
+            trace.event("http_waiter_cancelled")
+        raise
+    except ChatTurnAdmissionUnavailable:
         raise HTTPException(503, "Čuvanje razgovora trenutno nije dostupno.") from None
+    except Exception:
+        # The supervisor records the sanitized exception category.
+        raise HTTPException(503, "Status poruke trenutno nije dostupan.") from None
     match admission.get("error"):
         case "not_found":
             raise HTTPException(404, "Razgovor ili poruka nisu pronađeni.")
@@ -146,14 +163,7 @@ async def submit_chat_turn(
                 remaining=admission["remaining"], reset_at=datetime.fromisoformat(admission["reset_at"]) if admission["reset_at"] else None,
             )
             raise HTTPException(429, quota_payload(snapshot))
-    if not admission["claimed"]:
-        return _public_turn(admission["turn"], response)
-    try:
-        row = await execute_claimed_turn(repository, identity.user_id, turn_id, request, images)
-    except ChatTurnSettlementUnavailable:
-        # A committed response with a lost DB acknowledgment is recoverable by ID.
-        raise HTTPException(503, "Status poruke trenutno nije dostupan.") from None
-    return _public_turn(row, response)
+    return _public_turn(admission["turn"], response)
 
 
 @router.get("/chat/turns/{turn_id}", response_model=ChatTurn, dependencies=[Depends(_require_server_turns)])

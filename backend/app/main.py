@@ -14,12 +14,15 @@ from app.api.routes.research import router as research_router
 from app.api.routes.usage import router as usage_router
 from app.clients.supabase import validate_supabase_server_config
 from app.core.config import settings
+from app.services.chat_turn_supervisor import ChatTurnSupervisor
 from app.services.research_worker import reconcile_research_jobs
 
 validate_supabase_server_config(settings)
 
 @asynccontextmanager
 async def lifespan(_app):
+    supervisor = ChatTurnSupervisor(settings.chat_turn_worker_capacity, settings.chat_turn_shutdown_drain_seconds)
+    _app.state.chat_turn_supervisor = supervisor
     async with asyncio.TaskGroup() as tasks:
         worker = tasks.create_task(reconcile_research_jobs()) if (
             settings.quota_enforcement_enabled and settings.gemini_research_model
@@ -29,6 +32,7 @@ async def lifespan(_app):
         finally:
             if worker:
                 worker.cancel()
+            await supervisor.shutdown()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
