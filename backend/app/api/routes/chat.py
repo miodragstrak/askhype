@@ -1,12 +1,17 @@
 import json
+import logging
+from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
-from app.api.dependencies import get_request_identity, get_usage_service
+from app.api.dependencies import get_authenticated_identity, get_request_identity, get_usage_service
 from app.auth.identity import RequestIdentity
+from app.core.config import settings
+from app.services.chat_turns import ChatTurn, ChatTurnRepository, ChatTurnSettlementUnavailable, execute_claimed_turn
 from app.providers.exceptions import (
     AIProviderConfigurationError,
     AIProviderResponseError,
@@ -21,10 +26,12 @@ from app.services.usage_service import (
     UsageService,
     UsageServiceUnavailable,
     quota_payload,
+    UsageSnapshot,
     usage_headers,
 )
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -94,6 +101,73 @@ async def chat(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unsupported AI provider configuration.",
         ) from exc
+
+
+async def get_chat_turn_repository() -> ChatTurnRepository:
+    return ChatTurnRepository()
+
+
+async def _require_server_turns() -> None:
+    if not settings.server_chat_turns_enabled or not settings.quota_enforcement_enabled:
+        raise HTTPException(404, "Server conversation turns are disabled.")
+
+
+def _public_turn(row, response: Response):
+    if row is None:
+        raise HTTPException(404, "Razgovor ili poruka nisu pronađeni.")
+    response.status_code = 202 if row["status"] == "processing" else 200
+    response.headers["Cache-Control"] = "private, no-store"
+    return ChatTurn.model_validate(row)
+
+
+@router.post("/chat/turns/{turn_id}", response_model=ChatTurn, dependencies=[Depends(_require_server_turns)])
+async def submit_chat_turn(
+    turn_id: UUID, conversation_id: UUID, http_request: Request, response: Response,
+    create_conversation: bool = False,
+    identity: RequestIdentity = Depends(get_authenticated_identity),
+    repository: ChatTurnRepository = Depends(get_chat_turn_repository),
+):
+    request, images = await _parse_chat_request(http_request)
+    try:
+        admission = await repository.accept(
+            identity.user_id, turn_id, conversation_id, request, images, create_conversation,
+        )
+    except Exception as exc:
+        logger.warning("chat_turn_admission_error turn=%s category=%s", turn_id, type(exc).__name__)
+        raise HTTPException(503, "Čuvanje razgovora trenutno nije dostupno.") from None
+    match admission.get("error"):
+        case "not_found":
+            raise HTTPException(404, "Razgovor ili poruka nisu pronađeni.")
+        case "conflict":
+            raise HTTPException(409, "Identifikator poruke je već upotrebljen.")
+        case "quota":
+            snapshot = UsageSnapshot(
+                identity=identity.kind, plan=identity.plan, used=admission["used"], limit=admission["limit"],
+                remaining=admission["remaining"], reset_at=datetime.fromisoformat(admission["reset_at"]) if admission["reset_at"] else None,
+            )
+            raise HTTPException(429, quota_payload(snapshot))
+    if not admission["claimed"]:
+        return _public_turn(admission["turn"], response)
+    try:
+        row = await execute_claimed_turn(repository, identity.user_id, turn_id, request, images)
+    except ChatTurnSettlementUnavailable:
+        # A committed response with a lost DB acknowledgment is recoverable by ID.
+        raise HTTPException(503, "Status poruke trenutno nije dostupan.") from None
+    return _public_turn(row, response)
+
+
+@router.get("/chat/turns/{turn_id}", response_model=ChatTurn, dependencies=[Depends(_require_server_turns)])
+async def read_chat_turn(
+    turn_id: UUID, response: Response,
+    identity: RequestIdentity = Depends(get_authenticated_identity),
+    repository: ChatTurnRepository = Depends(get_chat_turn_repository),
+):
+    try:
+        row = await repository.read(identity.user_id, turn_id)
+    except Exception as exc:
+        logger.warning("chat_turn_read_error turn=%s category=%s", turn_id, type(exc).__name__)
+        raise HTTPException(503, "Status poruke trenutno nije dostupan.") from None
+    return _public_turn(row, response)
 
 
 async def _finalize_failed(

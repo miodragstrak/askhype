@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     generative_svg_beta_enabled: bool = False
     animation_render_timeout_seconds: int = Field(default=100, gt=0, le=180)
     research_max_depth: Literal["quick", "standard", "deep"] = "standard"
+    server_chat_turns_enabled: bool = False
     quota_enforcement_enabled: bool = False
     supabase_url: str | None = None
     supabase_secret_key: SecretStr | None = None

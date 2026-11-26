@@ -143,3 +143,22 @@ describe('durable conversation history', () => {
     expect(result.conversations[0].messages).toEqual([userMessage, assistantMessage]);
   });
 });
+
+it('keeps server history available when the import marker cannot be saved', async () => {
+  const repository = new MemoryRepository();
+  const startImport = vi.fn(() => false as const);
+  const result = await initializeAuthenticatedHistory(repository, [conversation()], null, startImport);
+  expect(startImport).toHaveBeenCalledOnce();
+  expect(result).toEqual({ conversations: [], migrated: false });
+  expect(repository.conversations.size).toBe(0);
+});
+
+it('builds a stable history cursor with a UUID tie-breaker', async () => {
+  const { historyCursor } = await import('./conversation-repository');
+  const id = conversation().id;
+  const timestamp = '2026-11-22T10:01:00.123456+00:00';
+  expect(historyCursor('updated_at', timestamp, id)).toBe(
+    `updated_at.lt.${timestamp},and(updated_at.eq.${timestamp},id.lt.${id})`,
+  );
+  expect(() => historyCursor('created_at', timestamp, 'malformed')).toThrow();
+});

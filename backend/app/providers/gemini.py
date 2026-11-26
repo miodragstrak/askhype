@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
 from urllib.parse import urlsplit
@@ -78,6 +79,30 @@ def gemini_http_status(error: Exception) -> int | None:
         if isinstance(value, int) and 100 <= value <= 599:
             return value
     return None
+
+_SAFE_PROVIDER_STATUSES = frozenset({
+    "INVALID_ARGUMENT", "FAILED_PRECONDITION", "PERMISSION_DENIED", "UNAUTHENTICATED",
+    "RESOURCE_EXHAUSTED", "NOT_FOUND", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INTERNAL",
+    "UNKNOWN", "CANCELLED", "ABORTED", "UNIMPLEMENTED", "OUT_OF_RANGE", "ALREADY_EXISTS",
+    "DATA_LOSS",
+})
+
+
+def grounding_error_details(exc: Exception) -> dict:
+    status = getattr(exc, "status", None)
+    code = getattr(exc, "code", None)
+    return {
+        "exception_class": type(exc).__name__,
+        "provider_status": status if isinstance(status, str) and status in _SAFE_PROVIDER_STATUSES else None,
+        "provider_code": code if type(code) is int and 0 <= code <= 599 else None,
+        "http_status": gemini_http_status(exc),
+    }
+
+
+def _grounding_field(value, key):
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+
+
 grounding_logger = logging.getLogger("uvicorn.error").getChild("chat_grounding")
 
 _URL_ADAPTER = TypeAdapter(AnyUrl)
@@ -653,44 +678,53 @@ class GeminiProvider:
             if images:
                 contents = [types.Part.from_text(text=user_context)]
                 contents.extend(types.Part.from_bytes(data=image.data, mime_type=image.content_type) for image in images)
+            trace = None
+            if grounded_ordinary_chat:
+                trace = {"correlation_id": uuid4().hex, "model": self.model, "tool": "google_search",
+                         "structured_output": config.response_json_schema is not None, "attempt_count": 0}
+                grounding_logger.info("chat_grounding %s", {"outcome": "tool_supplied", **trace})
+            started = monotonic()
             try:
-                if grounded_ordinary_chat:
-                    grounding_logger.info("chat_grounding %s", {"outcome": "tool_supplied", "model": self.model})
-                response = await self._generate_content(contents=contents, config=config)
+                trace_kwargs = {"grounding_trace": trace} if trace is not None else {}
+                response = await self._generate_content(contents=contents, config=config, **trace_kwargs)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 if not grounded_ordinary_chat:
                     raise
                 grounding_logger.warning("chat_grounding %s", {
-                    "outcome": "provider_error",
+                    "outcome": "provider_error", **trace, **grounding_error_details(exc),
+                    "duration_seconds": round(monotonic() - started, 6),
                     "category": "timeout" if isinstance(exc, TimeoutError) else self._fallback_failure_category(exc),
                 })
-                return self._grounding_limitation(request)
+                return self._grounding_limitation(request, trace)
         except TimeoutError as exc:
             self._log_provider_failure("timeout")
             raise AIProviderTimeoutError("Gemini provider timed out.") from exc
         except asyncio.CancelledError:
             raise
         except (ValidationError, ValueError, TypeError) as exc:
-            self._log_provider_failure("invalid_request_schema", exc)
+            self._log_provider_failure("invalid_request_schema", None if grounded_ordinary_chat else exc)
             raise AIProviderResponseError("Gemini structured output schema is invalid.") from exc
         except Exception as exc:
             if self._is_invalid_request_schema_error(exc):
-                self._log_provider_failure("invalid_request_schema", exc)
+                self._log_provider_failure("invalid_request_schema", None if grounded_ordinary_chat else exc)
                 raise AIProviderResponseError("Gemini request schema was rejected.") from exc
-            self._log_provider_failure("unavailable", exc)
+            self._log_provider_failure("unavailable", None if grounded_ordinary_chat else exc)
             raise AIProviderUnavailableError("Gemini provider is unavailable.") from exc
 
         payload_type = self._payload_type(hype_context, source_context)
-        grounding_sources = self._grounding_sources(response) if grounded_ordinary_chat else []
+        grounding_sources = []
+        if trace is not None:
+            grounding_sources = self._grounding_sources(response, trace)
+            trace["duration_seconds"] = round(monotonic() - started, 6)
         try:
-            payload = self._parse_payload(response, payload_type)
+            payload = self._parse_payload(response, payload_type, log_exception=trace is None)
         except AIProviderResponseError:
             if not grounded_ordinary_chat:
                 raise
-            grounding_logger.warning("chat_grounding %s", {"outcome": "invalid_response"})
-            return self._grounding_limitation(request)
+            grounding_logger.warning("chat_grounding %s", {"outcome": "invalid_response", **trace})
+            return self._grounding_limitation(request, trace)
         if hype_context is not None:
             return build_hype_response(
                 hype_context,
@@ -711,10 +745,11 @@ class GeminiProvider:
         if grounded_ordinary_chat:
             grounding_logger.info("chat_grounding %s", {
                 "outcome": "sources_returned" if grounding_sources else "no_usable_sources",
+                **trace,
                 "source_count": len(grounding_sources),
             })
             if not grounding_sources:
-                return self._grounding_limitation(request)
+                return self._grounding_limitation(request, trace)
         return ChatResponse(
             conversation_id=request.conversation_id or f"conv_{uuid4()}",
             provider=self.provider_name,
@@ -724,8 +759,9 @@ class GeminiProvider:
             generated_at=datetime.now(UTC),
         )
 
-    def _grounding_limitation(self, request: ChatRequest) -> ChatResponse:
-        grounding_logger.info("chat_grounding %s", {"outcome": "ungrounded_fallback"})
+    def _grounding_limitation(self, request: ChatRequest, trace: dict) -> ChatResponse:
+        grounding_logger.info("chat_grounding %s", {"outcome": "ungrounded_fallback",
+                                                  "correlation_id": trace["correlation_id"]})
         language = resolve_output_language(request.message, request.language).language
         if language == "the language of the latest message" and re.search(
             r"\b(?:kakva|koje|pretrazi|pronadji|proveri|prognozu)\b", _language_search_text(request.message),
@@ -803,26 +839,25 @@ class GeminiProvider:
         )
 
     @staticmethod
-    def _grounding_sources(response: Any) -> list[SourceReference]:
-        def field(value: Any, name: str) -> Any:
-            return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
-
+    def _grounding_sources(response: Any, diagnostics: dict | None = None) -> list[SourceReference]:
+        field = _grounding_field
         candidates = field(response, "candidates")
-        if not isinstance(candidates, list):
-            return []
+        candidate = candidates[0] if isinstance(candidates, list) and candidates else None
+        metadata = field(candidate, "grounding_metadata")
+        chunks = field(metadata, "grounding_chunks")
+        chunks = chunks if isinstance(chunks, list) else []
+        reasons: dict[str, int] = {}
         sources: list[SourceReference] = []
         seen_urls: set[str] = set()
-        for candidate in candidates[:1]:
-            metadata = field(candidate, "grounding_metadata")
-            chunks = field(metadata, "grounding_chunks")
-            if not isinstance(chunks, list):
-                continue
-            for chunk in chunks:
-                web = field(chunk, "web")
-                url = field(web, "uri")
-                title = field(web, "title")
-                if not isinstance(url, str) or not url.strip():
-                    continue
+        for chunk in chunks:
+            web = field(chunk, "web")
+            url = field(web, "uri")
+            reason = None
+            if web is None:
+                reason = "non_web_chunk"
+            elif not isinstance(url, str) or not url.strip():
+                reason = "missing_uri"
+            else:
                 url = url.strip()
                 try:
                     parsed = urlsplit(url)
@@ -832,13 +867,25 @@ class GeminiProvider:
                 except ValueError:
                     usable = False
                 if not usable:
-                    continue
-                if url in seen_urls:
-                    continue
-                if not isinstance(title, str) or not title.strip():
-                    title = "Source"
-                seen_urls.add(url)
-                sources.append(SourceReference(title=title.strip(), url=url))
+                    reason = "invalid_uri"
+                elif url in seen_urls:
+                    reason = "duplicate_uri"
+            if reason:
+                reasons[reason] = reasons.get(reason, 0) + 1
+                continue
+            title = field(web, "title")
+            if not isinstance(title, str) or not title.strip():
+                title = "Source"
+            seen_urls.add(url)
+            sources.append(SourceReference(title=title.strip(), url=url))
+        if diagnostics is not None:
+            finish = field(candidate, "finish_reason")
+            finish = getattr(finish, "value", finish)
+            diagnostics.update(
+                grounding_metadata_present=metadata is not None, raw_chunk_count=len(chunks),
+                normalized_source_count=len(sources), source_rejections=reasons,
+                finish_reason=finish if isinstance(finish, str) and finish in types.FinishReason.__members__ else None,
+            )
         return sources
 
     def _is_invalid_request_schema_error(self, exc: Exception) -> bool:
@@ -863,9 +910,12 @@ class GeminiProvider:
         return status_code == 503 or status == "unavailable"
 
     async def _generate_content(self, *, contents: Any, config: types.GenerateContentConfig,
-                                model: str | None = None, timeout_seconds: int | None = None) -> Any:
+                                model: str | None = None, timeout_seconds: int | None = None,
+                                grounding_trace: dict | None = None) -> Any:
         async with asyncio.timeout(timeout_seconds or self.settings.gemini_timeout_seconds):
             for attempt in range(1, len(self._availability_retry_delays) + 2):
+                if grounding_trace is not None:
+                    grounding_trace.update(model=model or self.model, attempt_count=attempt, retry_count=attempt - 1)
                 try:
                     return await self._client.aio.models.generate_content(
                         model=model or self.model,
@@ -906,6 +956,9 @@ class GeminiProvider:
                                 supported = _PRESENTATION_THINKING_LEVELS.get(self.fallback_model.removeprefix("models/"), ())
                                 if level not in supported:
                                     fallback_config = config.model_copy(update={"thinking_config": None})
+                            if grounding_trace is not None:
+                                grounding_trace.update(model=self.fallback_model, attempt_count=attempt + 1,
+                                                       retry_count=attempt)
                             response = await self._client.aio.models.generate_content(
                                 model=self.fallback_model,
                                 contents=contents,
@@ -949,7 +1002,8 @@ class GeminiProvider:
             return "invalid_request"
         return "provider_error"
 
-    def _parse_payload(self, response: Any, payload_type: type[BaseModel] = GeminiNaturalChatPayload) -> BaseModel:
+    def _parse_payload(self, response: Any, payload_type: type[BaseModel] = GeminiNaturalChatPayload,
+                       *, log_exception: bool = True) -> BaseModel:
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, BaseModel):
             parsed = parsed.model_dump()
@@ -957,7 +1011,7 @@ class GeminiProvider:
             try:
                 return payload_type.model_validate(parsed)
             except ValidationError as exc:
-                self._log_provider_failure("invalid_response", exc)
+                self._log_provider_failure("invalid_response", exc if log_exception else None)
                 raise AIProviderResponseError("Gemini returned an invalid response.") from exc
 
         text = getattr(response, "text", None)
@@ -968,7 +1022,7 @@ class GeminiProvider:
         try:
             return payload_type.model_validate_json(text)
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
-            self._log_provider_failure("invalid_response", exc)
+            self._log_provider_failure("invalid_response", exc if log_exception else None)
             raise AIProviderResponseError("Gemini returned an invalid response.") from exc
 
     def _to_chat_response(

@@ -408,7 +408,7 @@ export const getUsage = async (options: ApiRequestOptions = {}): Promise<UsageSn
   try {
     response = await fetch(`${API_BASE_URL}/api/usage`, {
       headers: authHeaders(options.accessToken),
-      signal: options.signal,
+      signal: options.signal, cache: 'no-store',
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
@@ -465,7 +465,7 @@ export const getResearch = async (
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}/api/research/${encodeURIComponent(researchId)}`, {
-      headers: authHeaders(options.accessToken), signal: options.signal,
+      headers: authHeaders(options.accessToken), signal: options.signal, cache: 'no-store',
     });
   } catch {
     throw new ResearchApiError('Deep Research servis trenutno nije dostupan. Pokušajte ponovo kasnije.', 0, 'provider_unavailable');
@@ -500,3 +500,46 @@ export const researchFailureMessage = (job: ResearchJob): string => {
   }
   return '';
 };
+
+export interface DurableChatTurn {
+  id: string;
+  conversation_id: string;
+  assistant_message_id: string;
+  status: 'processing' | 'completed' | 'failed' | 'unknown';
+  created_at: string;
+  completed_at: string | null;
+  failure_code: string | null;
+  response: ChatResponse | null;
+}
+
+export async function submitDurableChatTurn(
+  id: string, conversationId: string, create: boolean, request: ChatRequest,
+  options: ApiRequestOptions, images: PendingImage[],
+): Promise<DurableChatTurn> {
+  const headers = authHeaders(options.accessToken);
+  const body = images.length ? new FormData() : JSON.stringify(request);
+  if (body instanceof FormData) {
+    body.append('request', JSON.stringify(request));
+    images.forEach(({ file }) => body.append('images', file));
+  } else {
+    headers['Content-Type'] = 'application/json';
+  }
+  const query = new URLSearchParams({ conversation_id: conversationId, create_conversation: String(create) });
+  const response = await fetch(`${API_BASE_URL}/api/chat/turns/${encodeURIComponent(id)}?${query}`, {
+    method: 'POST', headers, body, signal: options.signal, cache: 'no-store',
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as BackendValidationError | null;
+    if (response.status === 429 && isQuotaLimitPayload(payload?.detail)) throw new PromptLimitError(payload.detail);
+    throw new ApiError(getErrorMessage(response.status, payload), response.status);
+  }
+  return response.json();
+}
+
+export async function readDurableChatTurn(id: string, options: ApiRequestOptions): Promise<DurableChatTurn> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/turns/${encodeURIComponent(id)}`, {
+    headers: authHeaders(options.accessToken), signal: options.signal, cache: 'no-store',
+  });
+  if (!response.ok) throw new ApiError('Status poruke trenutno nije dostupan.', response.status);
+  return response.json();
+}

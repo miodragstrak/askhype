@@ -250,3 +250,82 @@ def test_image_chat_keeps_natural_grounded_request_contract() -> None:
     assert isinstance(models.calls[0]["contents"], list)
     assert models.calls[0]["config"].tools[0].google_search is not None
     assert result.answer_type == "chat"
+
+
+def test_grounding_diagnostics_preserve_safe_error_and_correlate_fallback(caplog):
+    class QuotaError(Exception):
+        code = 429
+        status = "RESOURCE_EXHAUSTED"
+
+    caplog.set_level("INFO")
+    models = FakeModels([QuotaError("private response body")])
+    provider = GeminiProvider(settings(), FakeClient(models))
+    asyncio.run(provider.generate_chat_response(
+        ChatRequest(message="private prompt"), enable_grounding=True,
+    ))
+
+    events = [record.args for record in caplog.records if record.msg == "chat_grounding %s"]
+    assert [event["outcome"] for event in events] == ["tool_supplied", "provider_error", "ungrounded_fallback"]
+    assert len({event["correlation_id"] for event in events}) == 1
+    failure = events[1]
+    assert failure["exception_class"] == "QuotaError"
+    assert failure["http_status"] == failure["provider_code"] == 429
+    assert failure["provider_status"] == "RESOURCE_EXHAUSTED"
+    assert failure["attempt_count"] == 1 and failure["retry_count"] == 0
+    assert failure["model"] == "gemini-test-model"
+    assert failure["tool"] == "google_search" and failure["structured_output"]
+    assert failure["duration_seconds"] >= 0
+    assert "private" not in caplog.text
+
+
+def test_grounding_logs_chunk_rejections_even_when_payload_is_invalid(caplog):
+    caplog.set_level("INFO")
+    response = grounded_response("unused", [
+        web_chunk("source", "https://example.test/source"),
+        web_chunk("duplicate", "https://example.test/source"),
+        web_chunk("malformed", "javascript:bad"),
+        web_chunk("missing", None),
+        SimpleNamespace(web=None),
+    ])
+    response.parsed = {"answer": {"secret": "private malformed content"}}
+    response.candidates[0].finish_reason = "STOP"
+    models = FakeModels([response])
+    provider = GeminiProvider(settings(), FakeClient(models))
+    result = asyncio.run(provider.generate_chat_response(
+        ChatRequest(message="What is the weather today?"), enable_grounding=True,
+    ))
+
+    event = next(record.args for record in caplog.records
+                 if record.msg == "chat_grounding %s" and record.args["outcome"] == "invalid_response")
+    assert result.sources == []
+    assert event["grounding_metadata_present"] and event["finish_reason"] == "STOP"
+    assert event["raw_chunk_count"] == 5 and event["normalized_source_count"] == 1
+    assert event["source_rejections"] == {
+        "duplicate_uri": 1, "invalid_uri": 1, "missing_uri": 1, "non_web_chunk": 1,
+    }
+    assert "private malformed content" not in caplog.text
+
+
+def test_grounding_diagnostics_track_existing_retry_and_actual_model(caplog):
+    class Unavailable(Exception):
+        code = 503
+        status = "UNAVAILABLE"
+
+    caplog.set_level("INFO")
+    models = FakeModels([
+        Unavailable("body"), Unavailable("body"), Unavailable("body"),
+        grounded_response("Verified answer", [web_chunk("source", "https://example.test/source")]),
+    ])
+    config = settings().model_copy(update={"gemini_fallback_model": "configured-fallback"})
+    provider = GeminiProvider(config, FakeClient(models))
+    provider._availability_retry_delays = (0, 0)
+    answer = asyncio.run(provider.generate_chat_response(
+        ChatRequest(message="What is the weather today?"), enable_grounding=True,
+    ))
+
+    event = next(record.args for record in caplog.records
+                 if record.msg == "chat_grounding %s" and record.args["outcome"] == "sources_returned")
+    assert answer.sources and all(call["config"].tools[0].google_search is not None for call in models.calls)
+    assert event["model"] == "configured-fallback"
+    assert event["attempt_count"] == len(models.calls) == 4
+    assert event["retry_count"] == 3

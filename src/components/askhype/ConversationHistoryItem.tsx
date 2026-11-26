@@ -3,6 +3,7 @@ import type { LocalConversation } from '../../types/conversation';
 
 interface ConversationHistoryItemProps {
   conversation: LocalConversation;
+  unsaved: boolean;
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -11,6 +12,7 @@ interface ConversationHistoryItemProps {
 export const ConversationHistoryItem = ({
   conversation,
   active,
+  unsaved,
   onSelect,
   onDelete,
 }: ConversationHistoryItemProps) => (
@@ -23,6 +25,7 @@ export const ConversationHistoryItem = ({
     >
       <MessageSquare size={15} className="flex-none text-chat-muted" />
       <span className="truncate text-sm font-medium text-chat-text">{conversation.title}</span>
+      {unsaved && <span className="shrink-0 text-xs text-chat-muted">Nesačuvano</span>}
     </button>
     <button
       type="button"

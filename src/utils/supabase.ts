@@ -9,4 +9,6 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  global: { fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }) },
+});

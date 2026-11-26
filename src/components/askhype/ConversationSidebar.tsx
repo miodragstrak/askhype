@@ -4,8 +4,11 @@ import { ConversationHistoryItem } from './ConversationHistoryItem';
 
 interface ConversationSidebarProps {
   conversations: LocalConversation[];
+  unsavedIds: ReadonlySet<string>;
   activeId: string | null;
   mobileOpen: boolean;
+  onLoadOlder?: () => void;
+  paging: boolean;
   onClose: () => void;
   onNew: () => void;
   onSelect: (id: string) => void;
@@ -15,6 +18,9 @@ interface ConversationSidebarProps {
 export const ConversationSidebar = ({
   conversations,
   activeId,
+  unsavedIds,
+  onLoadOlder,
+  paging,
   mobileOpen,
   onClose,
   onNew,
@@ -63,6 +69,7 @@ export const ConversationSidebar = ({
               <ConversationHistoryItem
                 key={conversation.id}
                 conversation={conversation}
+                unsaved={unsavedIds.has(conversation.id)}
                 active={conversation.id === activeId}
                 onSelect={() => onSelect(conversation.id)}
                 onDelete={() => onDelete(conversation.id)}
@@ -72,6 +79,7 @@ export const ConversationSidebar = ({
         ) : (
           <p className="px-3 py-5 text-sm leading-6 text-chat-muted">Tvoji razgovori će se pojaviti ovde.</p>
         )}
+        {onLoadOlder && <button type="button" className="px-3 py-2 text-sm underline" disabled={paging} onClick={onLoadOlder}>Prikaži starije razgovore</button>}
       </div>
     </aside>
   </>

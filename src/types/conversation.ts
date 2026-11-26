@@ -5,6 +5,7 @@ export type LocalMessage =
       id: string;
       role: 'user';
       text: string;
+      ordinaryTurn?: boolean;
       // Object URLs are page-lifetime previews only; image bytes are never persisted or resent.
       imagePreviews?: string[];
       // Display metadata only; uploaded document bytes are never persisted.
@@ -17,6 +18,7 @@ export type LocalMessage =
       id: string;
       role: 'assistant';
       response: ChatResponse;
+      ordinaryTurnId?: string;
       createdAt: string;
     };
 

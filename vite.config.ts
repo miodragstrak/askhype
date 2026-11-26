@@ -47,18 +47,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/(?![^/]+\/api\/research(?:[/?]|$)).*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'offlineCache',
-              expiration: {
-                maxEntries: 200,
-              }
-            }
-          }
-        ]
+        cleanupOutdatedCaches: true,
+        importScripts: ['/history-cache-upgrade.js'],
       }
     })
   ],
